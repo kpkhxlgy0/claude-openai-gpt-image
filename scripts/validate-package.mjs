@@ -51,6 +51,53 @@ await mustExist(".claude-plugin/marketplace.json");
 await mustExist(".mcp.json");
 await mustExist("package.json");
 
+function isGitIgnored(relativePath) {
+  try {
+    execFileSync("git", ["check-ignore", "-q", "--", relativePath], {
+      cwd: projectRoot,
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isGitTracked(relativePath) {
+  const output = execFileSync(
+    "git",
+    ["ls-files", "--", relativePath],
+    { cwd: projectRoot, encoding: "utf8" },
+  ).trim();
+  return output.replaceAll("\\", "/") === relativePath.replaceAll("\\", "/");
+}
+
+if (isGitIgnored("dist/server.mjs")) {
+  fail("dist/server.mjs must not be gitignored; marketplace checkouts need the bundled server");
+}
+
+if (!isGitTracked("dist/server.mjs")) {
+  fail("dist/server.mjs must be tracked so Git marketplace installs include the runtime entry point");
+}
+
+try {
+  const ignoreLines = (await readFile(path.join(projectRoot, ".gitignore"), "utf8"))
+    .split(/\r?\n/)
+    .map((line) => line.trim());
+  const ignoresDistContents = ignoreLines.some(
+    (line) => line === "dist/*" || line === "dist/",
+  );
+  const allowsServer = ignoreLines.includes("!dist/server.mjs");
+  if (!ignoresDistContents) {
+    fail(".gitignore must ignore other dist contents (dist/* or dist/)");
+  }
+  if (!allowsServer) {
+    fail(".gitignore must explicitly allow dist/server.mjs with !dist/server.mjs");
+  }
+} catch {
+  fail("missing required file: .gitignore");
+}
+
 const plugin = await readJson(".claude-plugin/plugin.json");
 const marketplace = await readJson(".claude-plugin/marketplace.json");
 const pkg = await readJson("package.json");
