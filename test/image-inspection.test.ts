@@ -97,6 +97,16 @@ test("inspectImage rejects PNG chunks ordered PLTE after tRNS", async () => {
   await assert.rejects(() => inspectImage(image), isInputImageError);
 });
 
+test("inspectImage rejects PNG chunk types with the reserved lowercase bit", async () => {
+  const image = buildPng([
+    { type: "IHDR", data: makePngIhdr({ width: 1, height: 1 }) },
+    { type: "abca", data: Buffer.alloc(0) },
+    { type: "IDAT", data: deflateSync(Buffer.from([0, 0, 0, 0, 0])) },
+    { type: "IEND", data: Buffer.alloc(0) },
+  ]);
+  await assert.rejects(() => inspectImage(image), isInputImageError);
+});
+
 test("inspectImage rejects bytes after the complete PNG zlib stream", async () => {
   const compressed = deflateSync(Buffer.from([0, 0, 0, 0, 0]));
   const image = buildPng([

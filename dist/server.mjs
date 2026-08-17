@@ -456,7 +456,7 @@ function validateScanlines(header, compressedParts, paletteEntries) {
   if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0 || expectedBytes > MAX_DECODED_IMAGE_BYTES) {
     invalidPng("decompressed scanlines exceed the supported limit");
   }
-  const compressed = Buffer.concat(compressedParts);
+  const compressed = compressedParts.length === 1 ? compressedParts[0] : Buffer.concat(compressedParts);
   let inflated;
   let consumedBytes;
   try {
@@ -514,6 +514,9 @@ function inspectPng(buffer) {
     const typeBytes = buffer.subarray(typeStart, dataStart);
     const type = typeBytes.toString("ascii");
     if (!/^[A-Za-z]{4}$/.test(type)) invalidPng("chunk type is invalid");
+    if ((typeBytes[2] & 32) !== 0) {
+      invalidPng("chunk type uses the reserved lowercase bit");
+    }
     const expectedCrc = buffer.readUInt32BE(dataEnd);
     const actualCrc = crc32(buffer.subarray(typeStart, dataEnd));
     if (actualCrc !== expectedCrc) invalidPng(`${type} CRC mismatch`);
