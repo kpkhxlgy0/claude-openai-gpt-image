@@ -1,0 +1,22 @@
+{
+  "name": "kpk-plugins",
+  "owner": {
+    "name": "KPK"
+  },
+  "description": "Claude plugins maintained by KPK.",
+  "plugins": [
+    {
+      "name": "gpt-image-2",
+      "source": "./",
+      "description": "Generate and edit project images with OpenAI GPT Image 2 through a bundled local MCP server.",
+      "version": "0.1.0",
+      "author": {
+        "name": "KPK"
+      },
+      "license": "MIT",
+      "category": "development",
+      "tags": ["images", "openai", "gpt-image-2", "mcp"],
+      "strict": true
+    }
+  ]
+}

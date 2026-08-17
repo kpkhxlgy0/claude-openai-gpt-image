@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "images": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/server.mjs"],
+      "env": {
+        "OPENAI_API_KEY": "${user_config.openai_api_key}",
+        "OPENAI_BASE_URL": "${user_config.openai_base_url}",
+        "GPT_IMAGE_WORKSPACE_ROOT": "${CLAUDE_PROJECT_DIR}",
+        "GPT_IMAGE_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}"
+      }
+    }
+  }
+}
