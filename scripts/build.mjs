@@ -1,4 +1,4 @@
-import { mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -42,7 +42,13 @@ const decoderWasm = await readFile(decoderWasmPath);
 const decoderFingerprint = Buffer.from(
   decoderWasm.subarray(0, 96).toString("base64"),
 );
-const bundle = await readFile(outfile);
+const bundleText = await readFile(outfile, "utf8");
+const normalizedBundle = bundleText.replace(/^[\t ]+$/gm, "");
+if (normalizedBundle !== bundleText) {
+  await writeFile(outfile, normalizedBundle, "utf8");
+}
+
+const bundle = Buffer.from(normalizedBundle);
 if (!bundle.includes(decoderFingerprint)) {
   throw new Error("built server is missing the embedded WebP decoder WASM");
 }
