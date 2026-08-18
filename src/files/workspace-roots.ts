@@ -16,7 +16,7 @@ function normalizeKey(value: string): string {
   return isWindows() ? resolved.toLowerCase() : resolved;
 }
 
-function samePath(a: string, b: string): boolean {
+export function isSamePath(a: string, b: string): boolean {
   return normalizeKey(a) === normalizeKey(b);
 }
 
@@ -97,8 +97,8 @@ export class WorkspaceRootRegistry {
     // Selector never grants a new root — only matches already-approved ones.
     const match = this.#roots.find(
       (root) =>
-        samePath(root.canonicalPath, requested) ||
-        samePath(root.displayPath, requested),
+        isSamePath(root.canonicalPath, requested) ||
+        isSamePath(root.displayPath, requested),
     );
     if (!match) {
       // Attempt realpath match for aliases of approved roots only.
@@ -129,7 +129,7 @@ export class WorkspaceRootRegistry {
 export function isPathInsideRoot(rootCanonical: string, candidateCanonical: string): boolean {
   const root = path.resolve(rootCanonical);
   const candidate = path.resolve(candidateCanonical);
-  if (samePath(root, candidate)) {
+  if (isSamePath(root, candidate)) {
     return true;
   }
   const relative = path.relative(root, candidate);
@@ -145,5 +145,5 @@ export function isPathInsideRoot(rootCanonical: string, candidateCanonical: stri
   const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
   const candidateKey = isWindows() ? candidate.toLowerCase() : candidate;
   const rootKey = isWindows() ? rootWithSep.toLowerCase() : rootWithSep;
-  return candidateKey.startsWith(rootKey) || samePath(root, candidate);
+  return candidateKey.startsWith(rootKey) || isSamePath(root, candidate);
 }
