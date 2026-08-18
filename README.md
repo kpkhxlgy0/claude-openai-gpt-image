@@ -24,6 +24,8 @@ The plugin root is the marketplace root, and the marketplace entry points to `./
 
 The only runtime dependency is **Node.js 20+**, available on the PATH seen by Claude Desktop Code. The installed plugin starts the prebuilt `dist/server.mjs` directly. At runtime, the plugin does not run npm, npx, lifecycle scripts, source compilation, or load `node_modules`.
 
+The committed marketplace copy includes the standalone bundle. An installed-copy test launches only Git-tracked files and verifies that `get_status` works with no `node_modules` directory present and without an API key.
+
 npm and development dependencies are needed only by contributors building or testing the source checkout.
 
 ## Configure in the GUI
@@ -36,7 +38,7 @@ The default official Base URL is:
 https://api.openai.com/v1
 ```
 
-A custom Base URL receives the API key, prompts, and edit images sent by this plugin. Configure one only when you trust that endpoint and its operator. A custom endpoint should usually include `/v1`; the plugin does not append it automatically. For documentation and tests, the only custom endpoint example is:
+A custom Base URL receives the API key, prompts, and edit images sent by this plugin. Configure one only when you trust that endpoint and its operator. A custom endpoint should usually include `/v1`; the plugin does not append it automatically. The only user-facing documentation example is:
 
 ```text
 https://api.example.invalid/v1
@@ -44,13 +46,15 @@ https://api.example.invalid/v1
 
 The URL must be an absolute HTTP(S) URL without credentials, a query, a fragment, control characters, or surrounding whitespace. A compatible endpoint must implement the image API used by the OpenAI client; compatibility is not implied merely by accepting a URL.
 
+HTTP is permitted for trusted local or private-network compatible endpoints, but it sends the API key, prompts, and edit images without transport encryption. Use an `http://` Base URL only on a network and endpoint you trust; prefer HTTPS otherwise.
+
 Run `/gpt-image-2:setup` after installation. The command calls only `get_status` and makes no provider request.
 
 ## Tools
 
 ### `get_status`
 
-Reports only safe status data: API-key configured boolean, Base-URL configured/valid booleans, approved workspace roots, model, server version, and the default relative output directory. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
+Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, model, server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it in plugin settings and reload or restart the plugin. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
 
 ### `generate_image`
 
@@ -103,7 +107,7 @@ On Windows under Node 20, existing reparse-point/Junction escapes are rejected, 
 ## Troubleshooting
 
 - **API key not configured:** open Claude Desktop Code plugin settings and populate the sensitive API-key field. Do not paste the key into chat or a shell.
-- **Custom Base URL not used:** confirm the plugin setting was saved. Custom endpoints should usually end in `/v1`; no `/v1` segment is added automatically.
+- **Invalid or unused custom Base URL:** an invalid configured Base URL prevents the server from starting. Correct it in plugin settings, confirm the setting was saved, then reload or restart the plugin. Custom endpoints should usually end in `/v1`; no `/v1` segment is added automatically.
 - **No approved workspace root:** open the project in Claude Desktop Code and enable the plugin for that project.
 - **`OUTPUT_EXISTS`:** choose a new relative output path. The plugin will not overwrite.
 - **`SIZE_MISMATCH`:** use the returned actual width and height; the saved image is valid.
@@ -111,14 +115,15 @@ On Windows under Node 20, existing reparse-point/Junction escapes are rejected, 
 
 ## Build and test from source
 
-Development commands may install and use development dependencies; they are not part of installed-plugin runtime behavior.
+Development commands may install and use development dependencies; they are not part of installed-plugin runtime behavior. The validation command disables implicit npm lifecycle hooks before checking that the approved script set is exact.
 
 ```bash
 npm ci --ignore-scripts
 npm run typecheck
 npm test
 npm run build
-npm run validate
+npm run test:dist
+npm --ignore-scripts run validate
 ```
 
 These checks use local fixtures, fakes, and protocol tests. No paid image request is required. **No live provider verification has been performed or claimed.**

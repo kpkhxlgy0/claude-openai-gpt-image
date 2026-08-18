@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 import decodeWebP, { init as initWebP } from "@jsquash/webp/decode.js";
 import { AppError } from "../errors.ts";
 import { assertImageDimensions, type ImageInfo } from "./types.ts";
 
 const MAX_CHUNKS = 1024;
 const MAX_METADATA_BYTES = 16 * 1024 * 1024;
+const require = createRequire(import.meta.url);
 const VP8X_RESERVED_FLAGS = 0xc1;
 const VP8X_ICC_FLAG = 0x20;
 const VP8X_ALPHA_FLAG = 0x10;
@@ -42,10 +43,9 @@ async function loadDecoderWasmBytes(): Promise<Uint8Array> {
     return Buffer.from(decoderWasmBase64, "base64");
   }
 
-  const decoderUrl = import.meta.resolve(
-    "@jsquash/webp/codec/dec/webp_dec.wasm",
+  return readFile(
+    require.resolve("@jsquash/webp/codec/dec/webp_dec.wasm"),
   );
-  return readFile(fileURLToPath(decoderUrl));
 }
 
 function ensureDecoderInitialized(): Promise<void> {
@@ -127,8 +127,13 @@ function parseContainer(buffer: Buffer): WebPContainerInfo {
     if (chunkCount > MAX_CHUNKS) invalidWebP("chunk count exceeds the limit");
     if (buffer.length - offset < 8) invalidWebP("truncated chunk header");
 
-    const type = buffer.toString("ascii", offset, offset + 4);
-    if (!/^[\x20-\x7e]{4}$/.test(type)) invalidWebP("chunk type is invalid");
+    for (let index = offset; index < offset + 4; index += 1) {
+      const byte = buffer[index]!;
+      if (byte < 0x20 || byte > 0x7e) {
+        invalidWebP("chunk type is invalid");
+      }
+    }
+    const type = buffer.toString("latin1", offset, offset + 4);
     const length = buffer.readUInt32LE(offset + 4);
     const payloadStart = offset + 8;
     if (length > buffer.length - payloadStart) invalidWebP("truncated chunk payload");

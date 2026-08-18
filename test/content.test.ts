@@ -163,6 +163,7 @@ test("English README documents supported GUI installation, runtime, safety, and 
       "Node.js 20+",
       "https://api.openai.com/v1",
       "https://api.example.invalid/v1",
+      "The only user-facing documentation example is:",
       ".claude/generated-images/gpt-image-2",
       "SIZE_MISMATCH",
       "TEMP_CLEANUP_PENDING",
@@ -171,7 +172,8 @@ test("English README documents supported GUI installation, runtime, safety, and 
       "npm run typecheck",
       "npm test",
       "npm run build",
-      "npm run validate",
+      "npm run test:dist",
+      "npm --ignore-scripts run validate",
     ],
     "README.md",
   );
@@ -182,6 +184,8 @@ test("English README documents supported GUI installation, runtime, safety, and 
       /plugin settings.{0,120}API key/is,
       /custom Base URL.{0,240}(?:receives|receive).{0,80}(?:API key|key).{0,120}prompts?.{0,120}edit images/is,
       /custom.{0,100}\/v1.{0,180}(?:not|no).{0,80}(?:append|added)/is,
+      /HTTP.{0,220}API key.{0,100}prompts?.{0,100}edit images.{0,100}without transport encryption/is,
+      /(?:Git-tracked|tracked).{0,120}(?:copy|files).{0,180}(?:without|no).{0,40}node_modules/is,
       /runtime.{0,160}(?:does not|doesn't|no).{0,80}npm.{0,80}npx.{0,100}node_modules/is,
       /one paid call at a time/i,
       /no (?:SDK|application).{0,80}retr(?:y|ies)/i,
@@ -197,7 +201,9 @@ test("English README documents supported GUI installation, runtime, safety, and 
       /same-authority.{0,160}outside.{0,80}(?:boundary|threat)/is,
       /native Win32 handle.{0,80}required/is,
       /get_status.{0,180}(?:no|zero).{0,80}(?:provider|image API)/is,
+      /invalid configured Base URL.{0,100}prevents.{0,60}(?:server )?startup.{0,160}plugin settings/is,
       /no live provider verification/i,
+      /validation command.{0,100}disables.{0,80}lifecycle hooks/is,
     ],
     "README.md",
   );
@@ -214,6 +220,7 @@ test("Chinese README documents the same supported surface and exact key rule", a
       "Node.js 20+",
       "https://api.openai.com/v1",
       "https://api.example.invalid/v1",
+      "面向用户文档中唯一的自定义端点示例是：",
       ".claude/generated-images/gpt-image-2",
       "SIZE_MISMATCH",
       "TEMP_CLEANUP_PENDING",
@@ -229,7 +236,8 @@ test("Chinese README documents the same supported surface and exact key rule", a
       "npm run typecheck",
       "npm test",
       "npm run build",
-      "npm run validate",
+      "npm run test:dist",
+      "npm --ignore-scripts run validate",
     ],
     "README.zh-CN.md",
   );
@@ -240,6 +248,9 @@ test("Chinese README documents the same supported surface and exact key rule", a
       /插件设置.{0,120}API Key/is,
       /自定义 Base URL.{0,260}(?:接收|收到).{0,100}(?:API Key|密钥).{0,140}(?:prompt|提示词).{0,140}(?:编辑图像|编辑输入图像)/is,
       /自定义.{0,100}\/v1.{0,180}(?:不会|不).{0,80}(?:自动追加|自动补)/is,
+      /HTTP.{0,220}API Key.{0,100}prompt.{0,140}编辑输入图像/is,
+      /HTTP.{0,220}没有传输加密/is,
+      /(?:Git 跟踪|跟踪的).{0,120}(?:副本|文件).{0,180}(?:不含|没有|无需).{0,40}node_modules/is,
       /运行时.{0,180}(?:不需要|不会运行).{0,100}npm.{0,100}npx.{0,120}node_modules/is,
       /同一时间.{0,80}(?:一个|1 个).{0,80}付费调用/is,
       /SDK.{0,80}(?:应用|程序).{0,80}(?:不重试|重试已禁用)/is,
@@ -252,7 +263,9 @@ test("Chinese README documents the same supported surface and exact key rule", a
       /同等权限.{0,180}威胁边界之外/is,
       /原生 Win32 句柄.{0,100}(?:才可|需要)/is,
       /get_status.{0,180}(?:不会|零).{0,100}(?:服务商|图像 API)/is,
+      /无效.{0,60}Base URL.{0,100}阻止.{0,80}(?:server|服务器).{0,60}启动.{0,160}插件设置/is,
       /未进行.{0,80}实时服务商验证/is,
+      /验证命令.{0,100}禁用.{0,100}lifecycle hooks/is,
     ],
     "README.zh-CN.md",
   );
@@ -284,6 +297,9 @@ test("legal and release files identify the release without unsupported verificat
     "THIRD_PARTY_NOTICES.md",
   );
   assert.match(changelog, /0\.1\.0/);
+  assert.match(changelog, /installed-copy/i);
+  assert.match(changelog, /Git-(?:tracked|index).{0,120}node_modules/is);
+  assert.match(changelog, /strict package validation/i);
   assert.match(changelog, /no paid image API call/i);
   assert.match(changelog, /no live provider verification/i);
   assert.doesNotMatch(

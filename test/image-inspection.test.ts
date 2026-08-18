@@ -8,6 +8,7 @@ import {
   buildPng,
   corruptWebPBitstream,
   makeBaselineJpeg,
+  makeExtendedWebPWithHighBitChunkType,
   makeLosslessWebP,
   makeLossyWebP,
   makePng,
@@ -253,6 +254,13 @@ test("inspectImage fully decodes lossy and lossless WebP fixtures", async () => 
     height: 2,
     hasAlpha: true,
   });
+});
+
+test("inspectImage rejects WebP chunk types with high-bit bytes", async () => {
+  await assert.rejects(
+    () => inspectImage(makeExtendedWebPWithHighBitChunkType()),
+    isInputImageError,
+  );
 });
 
 test("inspectImage rejects WebP RIFF length mismatch and truncated chunks", async () => {

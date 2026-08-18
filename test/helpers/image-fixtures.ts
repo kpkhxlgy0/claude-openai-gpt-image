@@ -143,6 +143,30 @@ export function makeLosslessWebP(): Buffer {
   return Buffer.from(LOSSLESS_WEBP_BASE64, "base64");
 }
 
+export function makeExtendedWebPWithHighBitChunkType(): Buffer {
+  const simple = makeLosslessWebP();
+  const vp8xPayload = Buffer.alloc(10);
+  vp8xPayload[0] = 0x10;
+  vp8xPayload.writeUIntLE(2, 4, 3);
+  vp8xPayload.writeUIntLE(1, 7, 3);
+
+  const vp8x = Buffer.alloc(18);
+  vp8x.write("VP8X", 0, "ascii");
+  vp8x.writeUInt32LE(vp8xPayload.length, 4);
+  vp8xPayload.copy(vp8x, 8);
+
+  const highBitChunk = Buffer.alloc(8);
+  Buffer.from([0xd5, 0x4e, 0x4b, 0x4e]).copy(highBitChunk);
+
+  const body = Buffer.concat([vp8x, highBitChunk, simple.subarray(12)]);
+  const extended = Buffer.alloc(12 + body.length);
+  extended.write("RIFF", 0, "ascii");
+  extended.writeUInt32LE(extended.length - 8, 4);
+  extended.write("WEBP", 8, "ascii");
+  body.copy(extended, 12);
+  return extended;
+}
+
 export function makeTruncatedWebP(bytes: Buffer): Buffer {
   const truncated = Buffer.from(bytes.subarray(0, -2));
   truncated.writeUInt32LE(truncated.length - 8, 4);

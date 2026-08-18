@@ -24,6 +24,8 @@ GUI 插件安装是首选方式：
 
 唯一运行时依赖是 **Node.js 20+**，并且 Claude Desktop Code 所见的 PATH 必须能找到它。已安装插件直接启动预构建的 `dist/server.mjs`。运行时不需要 npm、npx 或 node_modules，也不会运行 lifecycle scripts、源码编译或安装命令。
 
+提交到 Git 的 marketplace 副本包含独立 bundle。installed-copy 测试只启动 Git 跟踪文件，并验证在没有 `node_modules` 目录、也没有 API Key 的情况下 `get_status` 仍可工作。
+
 只有从源码构建和测试的开发者才需要 npm 与开发依赖。
 
 ## 在 GUI 中配置
@@ -38,7 +40,7 @@ GUI 插件安装是首选方式：
 https://api.openai.com/v1
 ```
 
-自定义 Base URL 会接收 API Key、prompt（提示词）和编辑输入图像。只有在信任该端点及其运营方时才应配置。自定义端点通常应包含 `/v1`；插件不会自动追加或补全它。文档和测试中唯一的自定义端点示例是：
+自定义 Base URL 会接收 API Key、prompt（提示词）和编辑输入图像。只有在信任该端点及其运营方时才应配置。自定义端点通常应包含 `/v1`；插件不会自动追加或补全它。面向用户文档中唯一的自定义端点示例是：
 
 ```text
 https://api.example.invalid/v1
@@ -46,13 +48,15 @@ https://api.example.invalid/v1
 
 URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fragment、控制字符或首尾空白。仅仅能填写 URL 并不代表端点兼容；该端点必须实现 OpenAI client 所调用的图像 API。
 
+插件允许为受信任的本地或私有网络兼容端点使用 HTTP，但 `http://` 会在没有传输加密的情况下发送 API Key、prompt 和编辑输入图像。只有在信任该网络和端点时才使用 HTTP；其他情况应优先使用 HTTPS。
+
 安装后可运行 `/gpt-image-2:setup`。该命令只调用 `get_status`，不会发出服务商请求。
 
 ## 工具
 
 ### `get_status`
 
-只返回安全状态：API Key 是否已配置、Base URL 是否已配置/有效、已批准工作区根目录、模型、server 版本和默认相对输出目录。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
+只返回安全状态：API Key 是否已配置、是否配置了自定义 Base URL、运行中 server 的活动 URL 所对应的 `base_url_valid: true`、已批准工作区根目录、模型、server 版本和默认相对输出目录。无效的已配置 Base URL 会阻止 server 启动；请在插件设置中修正后重新加载或重启插件。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
 
 ### `generate_image`
 
@@ -105,7 +109,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 ## 故障排查
 
 - **API Key 未配置：** 打开 Claude Desktop Code 的插件设置，填写敏感 API Key 字段；不要把密钥粘贴到 chat 或 shell。
-- **自定义 Base URL 未生效：** 确认插件设置已保存。自定义端点通常应以 `/v1` 结尾，插件不会自动补全 `/v1`。
+- **自定义 Base URL 无效或未生效：** 无效的已配置 Base URL 会阻止 server 启动。请在插件设置中修正并确认已保存，然后重新加载或重启插件。自定义端点通常应以 `/v1` 结尾，插件不会自动补全 `/v1`。
 - **没有已批准工作区根目录：** 在 Claude Desktop Code 中打开项目，并为该项目启用插件。
 - **`OUTPUT_EXISTS`：** 更换相对输出路径；插件禁止覆盖。
 - **`SIZE_MISMATCH`：** 使用返回的实际宽高；已保存图像仍然有效。
@@ -113,14 +117,15 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ## 从源码构建与测试
 
-以下开发命令可以安装并使用开发依赖，但它们不是已安装插件的运行时行为：
+以下开发命令可以安装并使用开发依赖，但它们不是已安装插件的运行时行为。验证命令会先禁用 npm 隐式 lifecycle hooks，再检查批准的 scripts 集合是否完全一致。
 
 ```bash
 npm ci --ignore-scripts
 npm run typecheck
 npm test
 npm run build
-npm run validate
+npm run test:dist
+npm --ignore-scripts run validate
 ```
 
 这些检查使用本地 fixture、fake 和协议测试，不需要付费图像请求。**未进行任何实时服务商验证，也不作此类声明。**

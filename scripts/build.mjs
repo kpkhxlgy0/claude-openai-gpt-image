@@ -1,4 +1,5 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -6,6 +7,7 @@ import { build } from "esbuild";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
 const outfile = join(projectRoot, "dist", "server.mjs");
+const require = createRequire(import.meta.url);
 
 await mkdir(dirname(outfile), { recursive: true });
 
@@ -35,22 +37,19 @@ await build({
   },
 });
 
-const decoderWasmPath = fileURLToPath(
-  import.meta.resolve("@jsquash/webp/codec/dec/webp_dec.wasm"),
+const decoderWasmPath = require.resolve(
+  "@jsquash/webp/codec/dec/webp_dec.wasm",
 );
 const decoderWasm = await readFile(decoderWasmPath);
-const decoderFingerprint = Buffer.from(
-  decoderWasm.subarray(0, 96).toString("base64"),
-);
+const decoderBase64 = decoderWasm.toString("base64");
 const bundleText = await readFile(outfile, "utf8");
 const normalizedBundle = bundleText.replace(/^[\t ]+$/gm, "");
 if (normalizedBundle !== bundleText) {
   await writeFile(outfile, normalizedBundle, "utf8");
 }
 
-const bundle = Buffer.from(normalizedBundle);
-if (!bundle.includes(decoderFingerprint)) {
-  throw new Error("built server is missing the embedded WebP decoder WASM");
+if (!normalizedBundle.includes(decoderBase64)) {
+  throw new Error("built server is missing the complete embedded WebP decoder WASM");
 }
 
 console.error(`built ${outfile}`);

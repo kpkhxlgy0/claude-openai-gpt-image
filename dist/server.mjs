@@ -35013,7 +35013,7 @@ function inspectPng(buffer) {
 
 // src/images/webp.ts
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 // node_modules/@jsquash/webp/codec/dec/webp_dec.js
 var Module = (() => {
@@ -36416,6 +36416,7 @@ async function decode3(buffer) {
 // src/images/webp.ts
 var MAX_CHUNKS2 = 1024;
 var MAX_METADATA_BYTES2 = 16 * 1024 * 1024;
+var require2 = createRequire(import.meta.url);
 var VP8X_RESERVED_FLAGS = 193;
 var VP8X_ICC_FLAG = 32;
 var VP8X_ALPHA_FLAG = 16;
@@ -36431,10 +36432,9 @@ async function loadDecoderWasmBytes() {
     const { default: decoderWasmBase64 } = await Promise.resolve().then(() => __toESM(require_webp_dec(), 1));
     return Buffer.from(decoderWasmBase64, "base64");
   }
-  const decoderUrl = import.meta.resolve(
-    "@jsquash/webp/codec/dec/webp_dec.wasm"
+  return readFile(
+    require2.resolve("@jsquash/webp/codec/dec/webp_dec.wasm")
   );
-  return readFile(fileURLToPath(decoderUrl));
 }
 function ensureDecoderInitialized() {
   decoderInitialization ??= (async () => {
@@ -36503,8 +36503,13 @@ function parseContainer(buffer) {
     chunkCount += 1;
     if (chunkCount > MAX_CHUNKS2) invalidWebP("chunk count exceeds the limit");
     if (buffer.length - offset < 8) invalidWebP("truncated chunk header");
-    const type = buffer.toString("ascii", offset, offset + 4);
-    if (!/^[\x20-\x7e]{4}$/.test(type)) invalidWebP("chunk type is invalid");
+    for (let index = offset; index < offset + 4; index += 1) {
+      const byte = buffer[index];
+      if (byte < 32 || byte > 126) {
+        invalidWebP("chunk type is invalid");
+      }
+    }
+    const type = buffer.toString("latin1", offset, offset + 4);
     const length = buffer.readUInt32LE(offset + 4);
     const payloadStart = offset + 8;
     if (length > buffer.length - payloadStart) invalidWebP("truncated chunk payload");
@@ -37196,7 +37201,7 @@ var OpenAIImageClient = class {
 };
 
 // src/server.ts
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import { fileURLToPath } from "node:url";
 
 // node_modules/zod/v3/helpers/util.js
 var util;
@@ -46446,7 +46451,7 @@ function fileRootPath(uri) {
     if (value.protocol !== "file:" || value.username !== "" || value.password !== "" || value.search !== "" || value.hash !== "" || value.hostname !== "" && value.hostname !== "localhost") {
       return void 0;
     }
-    return fileURLToPath2(value);
+    return fileURLToPath(value);
   } catch {
     return void 0;
   }

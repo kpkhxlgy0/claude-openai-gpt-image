@@ -61,14 +61,14 @@ test("validateOpenAIBaseUrl rejects whitespace, credentials, query, fragment, an
 
 test("loadEnvironment reports key presence without mutating the raw key", () => {
   const config = loadEnvironment({
-    OPENAI_API_KEY: "sk-test-raw-key",
+    OPENAI_API_KEY: "test-key-raw",
     OPENAI_BASE_URL: "https://example.test/v1///",
     GPT_IMAGE_WORKSPACE_ROOT: "D:\\project",
     GPT_IMAGE_PLUGIN_DATA: "D:\\plugin-data",
   });
 
   assert.equal(config.apiKeyConfigured, true);
-  assert.equal(config.apiKey, "sk-test-raw-key");
+  assert.equal(config.apiKey, "test-key-raw");
   assert.equal(config.baseUrl, "https://example.test/v1");
   assert.equal(config.baseUrlConfigured, true);
   assert.equal(config.workspaceRoot, "D:\\project");
@@ -85,10 +85,10 @@ test("loadEnvironment treats whitespace-only keys as missing and keeps raw non-e
   assert.equal(missing.baseUrlConfigured, false);
 
   const withSpaces = loadEnvironment({
-    OPENAI_API_KEY: "  sk-with-spaces  ",
+    OPENAI_API_KEY: "  test-key-with-spaces  ",
   });
   assert.equal(withSpaces.apiKeyConfigured, true);
-  assert.equal(withSpaces.apiKey, "  sk-with-spaces  ");
+  assert.equal(withSpaces.apiKey, "  test-key-with-spaces  ");
 });
 
 test("loadEnvironment rejects invalid configured Base URLs", () => {
@@ -114,15 +114,15 @@ test("toErrorResult preserves AppError codes and sanitizes unknown failures", ()
   const secret = {
     message: "upstream failed",
     stack: "Error: secret stack",
-    cause: { authorization: "Bearer sk-secret", body: { prompt: "hidden" } },
+    cause: { authorization: "Bearer test-secret", body: { prompt: "hidden" } },
     response: { data: { error: "raw" } },
-    env: { OPENAI_API_KEY: "sk-secret" },
+    env: { OPENAI_API_KEY: "test-secret" },
   };
   const internal = toErrorResult(secret);
   assert.equal(internal.isError, true);
   assert.equal(internal.code, "INTERNAL_ERROR");
   const serialized = JSON.stringify(internal);
-  assert.equal(serialized.includes("sk-secret"), false);
+  assert.equal(serialized.includes("test-secret"), false);
   assert.equal(serialized.includes("Bearer"), false);
   assert.equal(serialized.includes("hidden"), false);
   assert.equal(serialized.includes("secret stack"), false);

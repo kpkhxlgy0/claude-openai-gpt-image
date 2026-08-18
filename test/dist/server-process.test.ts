@@ -1,13 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn, execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { promisify } from "node:util";
 
-const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 function sanitizedEnvironment(workspaceRoot: string): NodeJS.ProcessEnv {
@@ -62,12 +60,6 @@ test("built stdio server emits JSON-RPC only and exits when stdin closes", async
   );
   const env = sanitizedEnvironment(workspaceRoot);
   try {
-    await execFileAsync(process.execPath, ["scripts/build.mjs"], {
-      cwd: projectRoot,
-      env,
-      windowsHide: true,
-      timeout: 120_000,
-    });
     const builtServer = await readFile(
       path.join(projectRoot, "dist", "server.mjs"),
       "utf8",
@@ -193,12 +185,6 @@ test("fatal transport errors retain a nonzero exit when stdin also closes", asyn
   );
   const env = sanitizedEnvironment(workspaceRoot);
   try {
-    await execFileAsync(process.execPath, ["scripts/build.mjs"], {
-      cwd: projectRoot,
-      env,
-      windowsHide: true,
-      timeout: 120_000,
-    });
     const builtServer = await readFile(
       path.join(projectRoot, "dist", "server.mjs"),
       "utf8",
