@@ -7,17 +7,130 @@ export interface WorkspaceRoot {
   canonicalPath: string;
 }
 
+export type PathDialect = Pick<typeof path.win32, "resolve" | "sep">;
+
+export interface CanonicalPathOps {
+  normalize(value: string): string;
+  isSame(a: string, b: string): boolean;
+  contains(rootCanonical: string, candidateCanonical: string): boolean;
+}
+
+export interface WorkspaceRootSelectionPolicy {
+  pathOperations: CanonicalPathOps;
+  caseInsensitiveFallback: boolean;
+}
+
 function isWindows(): boolean {
   return process.platform === "win32";
 }
 
-function normalizeKey(value: string): string {
-  const resolved = path.resolve(value);
-  return isWindows() ? resolved.toLowerCase() : resolved;
+export function createCanonicalPathOps(pathDialect: PathDialect): CanonicalPathOps {
+  const normalize = (value: string): string => pathDialect.resolve(value);
+  return {
+    normalize,
+    isSame(a: string, b: string): boolean {
+      return normalize(a) === normalize(b);
+    },
+    contains(rootCanonical: string, candidateCanonical: string): boolean {
+      const root = normalize(rootCanonical);
+      const candidate = normalize(candidateCanonical);
+      if (root === candidate) {
+        return true;
+      }
+      const rootWithSeparator = root.endsWith(pathDialect.sep)
+        ? root
+        : root + pathDialect.sep;
+      return candidate.startsWith(rootWithSeparator);
+    },
+  };
 }
 
+const HOST_PATH_OPERATIONS = createCanonicalPathOps(path);
+const HOST_SELECTION_POLICY: WorkspaceRootSelectionPolicy = {
+  pathOperations: HOST_PATH_OPERATIONS,
+  caseInsensitiveFallback: isWindows(),
+};
+
 export function isSamePath(a: string, b: string): boolean {
-  return normalizeKey(a) === normalizeKey(b);
+  return HOST_PATH_OPERATIONS.isSame(a, b);
+}
+
+export function isPathInsideRoot(
+  rootCanonical: string,
+  candidateCanonical: string,
+): boolean {
+  return HOST_PATH_OPERATIONS.contains(rootCanonical, candidateCanonical);
+}
+
+export function deduplicateCanonicalRoots(
+  roots: readonly WorkspaceRoot[],
+  pathOperations: CanonicalPathOps = HOST_PATH_OPERATIONS,
+): WorkspaceRoot[] {
+  const seen = new Set<string>();
+  const unique: WorkspaceRoot[] = [];
+  for (const root of roots) {
+    const key = pathOperations.normalize(root.canonicalPath);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(root);
+  }
+  return unique;
+}
+
+function requireUniqueMatch(matches: readonly WorkspaceRoot[]): WorkspaceRoot | undefined {
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  if (matches.length > 1) {
+    throw new AppError(
+      "WORKSPACE_ROOT_REQUIRED",
+      "Workspace root selector matches multiple approved roots",
+    );
+  }
+  return undefined;
+}
+
+export function selectApprovedWorkspaceRoot(
+  roots: readonly WorkspaceRoot[],
+  requested: string,
+  policy: WorkspaceRootSelectionPolicy = HOST_SELECTION_POLICY,
+): WorkspaceRoot {
+  const { pathOperations } = policy;
+
+  const exactCanonical = requireUniqueMatch(
+    roots.filter((root) => pathOperations.isSame(root.canonicalPath, requested)),
+  );
+  if (exactCanonical) {
+    return exactCanonical;
+  }
+
+  const exactDisplay = requireUniqueMatch(
+    roots.filter((root) => pathOperations.isSame(root.displayPath, requested)),
+  );
+  if (exactDisplay) {
+    return exactDisplay;
+  }
+
+  if (policy.caseInsensitiveFallback) {
+    const requestedKey = pathOperations.normalize(requested).toLowerCase();
+    const folded = requireUniqueMatch(
+      roots.filter(
+        (root) =>
+          pathOperations.normalize(root.canonicalPath).toLowerCase() === requestedKey ||
+          pathOperations.normalize(root.displayPath).toLowerCase() === requestedKey,
+      ),
+    );
+    if (folded) {
+      return folded;
+    }
+  }
+
+  throw new AppError(
+    "PATH_OUTSIDE_WORKSPACE",
+    "Requested workspace root is not an approved root",
+  );
 }
 
 export class WorkspaceRootRegistry {
@@ -25,7 +138,6 @@ export class WorkspaceRootRegistry {
 
   async replace(paths: readonly string[]): Promise<void> {
     const next: WorkspaceRoot[] = [];
-    const seen = new Set<string>();
 
     for (const raw of paths) {
       if (typeof raw !== "string" || raw.trim() === "") {
@@ -58,18 +170,13 @@ export class WorkspaceRootRegistry {
         );
       }
 
-      const key = normalizeKey(canonicalPath);
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
       next.push({
         displayPath: raw,
         canonicalPath,
       });
     }
 
-    this.#roots = next;
+    this.#roots = deduplicateCanonicalRoots(next);
   }
 
   list(): readonly WorkspaceRoot[] {
@@ -94,21 +201,7 @@ export class WorkspaceRootRegistry {
       );
     }
 
-    // Selector never grants a new root — only matches already-approved ones.
-    const match = this.#roots.find(
-      (root) =>
-        isSamePath(root.canonicalPath, requested) ||
-        isSamePath(root.displayPath, requested),
-    );
-    if (!match) {
-      // Attempt realpath match for aliases of approved roots only.
-      // Do not add new roots from the selector.
-      throw new AppError(
-        "PATH_OUTSIDE_WORKSPACE",
-        "Requested workspace root is not an approved root",
-      );
-    }
-    return match;
+    return selectApprovedWorkspaceRoot(this.#roots, requested);
   }
 
   /**
@@ -124,26 +217,4 @@ export class WorkspaceRootRegistry {
     }
     return undefined;
   }
-}
-
-export function isPathInsideRoot(rootCanonical: string, candidateCanonical: string): boolean {
-  const root = path.resolve(rootCanonical);
-  const candidate = path.resolve(candidateCanonical);
-  if (isSamePath(root, candidate)) {
-    return true;
-  }
-  const relative = path.relative(root, candidate);
-  if (relative === "") {
-    return true;
-  }
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return false;
-  }
-  // Guard sibling prefix collisions: root vs root-evil.
-  // path.relative already handles this when both are resolved, but double-check
-  // that the candidate is under root + separator when not equal.
-  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
-  const candidateKey = isWindows() ? candidate.toLowerCase() : candidate;
-  const rootKey = isWindows() ? rootWithSep.toLowerCase() : rootWithSep;
-  return candidateKey.startsWith(rootKey) || isSamePath(root, candidate);
 }

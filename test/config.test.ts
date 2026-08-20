@@ -91,14 +91,29 @@ test("loadEnvironment treats whitespace-only keys as missing and keeps raw non-e
   assert.equal(withSpaces.apiKey, "  test-key-with-spaces  ");
 });
 
+test("loadEnvironment treats the official manifest Base URL as not custom", () => {
+  const config = loadEnvironment({
+    OPENAI_BASE_URL: "https://api.openai.com/v1",
+  });
+
+  assert.equal(config.baseUrl, "https://api.openai.com/v1");
+  assert.equal(config.baseUrlConfigured, false);
+});
+
 test("loadEnvironment rejects invalid configured Base URLs", () => {
-  assert.throws(
-    () =>
-      loadEnvironment({
-        OPENAI_BASE_URL: " https://example.test/v1",
-      }),
-    /CONFIG_INVALID/,
-  );
+  for (const value of [
+    " https://example.test/v1",
+    "   ",
+    "\t",
+  ]) {
+    assert.throws(
+      () =>
+        loadEnvironment({
+          OPENAI_BASE_URL: value,
+        }),
+      /CONFIG_INVALID/,
+    );
+  }
 });
 
 test("toErrorResult preserves AppError codes and sanitizes unknown failures", () => {

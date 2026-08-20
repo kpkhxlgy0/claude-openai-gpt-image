@@ -42,10 +42,20 @@ export interface OpenAIImageAPIPromise {
   withResponse(): Promise<OpenAIImageWithResponse>;
 }
 
+export interface OpenAIImageRequestOptions {
+  readonly signal?: AbortSignal;
+}
+
 export interface OpenAIImageSDK {
   readonly images: {
-    generate(body: OpenAIImageGenerateBody): OpenAIImageAPIPromise;
-    edit(body: OpenAIImageEditBody): OpenAIImageAPIPromise;
+    generate(
+      body: OpenAIImageGenerateBody,
+      options?: OpenAIImageRequestOptions,
+    ): OpenAIImageAPIPromise;
+    edit(
+      body: OpenAIImageEditBody,
+      options?: OpenAIImageRequestOptions,
+    ): OpenAIImageAPIPromise;
   };
 }
 
@@ -58,6 +68,10 @@ export interface OpenAIImageLogger {
 
 export interface OpenAIImageClientOptions {
   readonly apiKey: string;
+  readonly adminAPIKey: null;
+  readonly organization: null;
+  readonly project: null;
+  readonly webhookSecret: null;
   readonly baseURL: string;
   readonly maxRetries: 0;
   readonly logLevel: "off";
@@ -96,8 +110,14 @@ function createDefaultSDKClient(
   const client = new OpenAI(options);
   return {
     images: {
-      generate: (body) => client.images.generate(body),
-      edit: (body) => client.images.edit(body),
+      generate: (body, requestOptions) =>
+        requestOptions === undefined
+          ? client.images.generate(body)
+          : client.images.generate(body, requestOptions),
+      edit: (body, requestOptions) =>
+        requestOptions === undefined
+          ? client.images.edit(body)
+          : client.images.edit(body, requestOptions),
     },
   };
 }
@@ -169,13 +189,17 @@ function assertEditSnapshots(request: ProviderEditRequest): void {
 
 async function readSnapshotBytes(
   snapshot: ProviderInputSnapshot,
+  signal?: AbortSignal,
 ): Promise<Buffer> {
+  signal?.throwIfAborted();
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(snapshot.snapshotPath, "r");
+    signal?.throwIfAborted();
     const bytes = Buffer.allocUnsafe(snapshot.sizeBytes);
     let offset = 0;
     while (offset < bytes.length) {
+      signal?.throwIfAborted();
       const result = await handle.read(
         bytes,
         offset,
@@ -188,13 +212,18 @@ async function readSnapshotBytes(
       offset += result.bytesRead;
     }
 
+    signal?.throwIfAborted();
     const extra = Buffer.allocUnsafe(1);
     const extraResult = await handle.read(extra, 0, 1, snapshot.sizeBytes);
+    signal?.throwIfAborted();
     if (offset !== snapshot.sizeBytes || extraResult.bytesRead !== 0) {
       invalidInput("Input snapshot size changed before upload");
     }
     return bytes;
   } catch (error) {
+    if (signal?.aborted) {
+      signal.throwIfAborted();
+    }
     if (error instanceof AppError) {
       throw error;
     }
@@ -209,13 +238,20 @@ async function readSnapshotBytes(
 
 async function snapshotToUpload(
   snapshot: ProviderInputSnapshot,
+  signal?: AbortSignal,
 ): Promise<File> {
-  const bytes = await readSnapshotBytes(snapshot);
+  const bytes = await readSnapshotBytes(snapshot, signal);
+  signal?.throwIfAborted();
   try {
-    return await toFile(bytes, snapshot.filename, {
+    const upload = await toFile(bytes, snapshot.filename, {
       type: snapshot.info.mimeType,
     });
-  } catch {
+    signal?.throwIfAborted();
+    return upload;
+  } catch (error) {
+    if (signal?.aborted) {
+      signal.throwIfAborted();
+    }
     throw new AppError(
       "INTERNAL_ERROR",
       "Input snapshot could not be prepared for upload",
@@ -331,6 +367,10 @@ export class OpenAIImageClient implements ImageProvider {
 
     const options: OpenAIImageClientOptions = Object.freeze({
       apiKey: config.apiKey,
+      adminAPIKey: null,
+      organization: null,
+      project: null,
+      webhookSecret: null,
       baseURL: validateOpenAIBaseUrl(config.baseURL),
       maxRetries: 0,
       logLevel: "off",
@@ -342,7 +382,11 @@ export class OpenAIImageClient implements ImageProvider {
     this.#sdk = createSDKClient(options);
   }
 
-  async generate(request: ProviderGenerateRequest): Promise<ProviderImage> {
+  async generate(
+    request: ProviderGenerateRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderImage> {
+    signal?.throwIfAborted();
     const body: OpenAIImageGenerateBody = {
       model: "gpt-image-2",
       n: 1,
@@ -353,14 +397,24 @@ export class OpenAIImageClient implements ImageProvider {
       moderation: request.moderation,
     };
     addCompression(body, request);
-    return this.#invoke(() => this.#sdk.images.generate(body));
+    return this.#invoke(
+      () =>
+        signal === undefined
+          ? this.#sdk.images.generate(body)
+          : this.#sdk.images.generate(body, { signal }),
+      signal,
+    );
   }
 
-  async edit(request: ProviderEditRequest): Promise<ProviderImage> {
+  async edit(
+    request: ProviderEditRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderImage> {
+    signal?.throwIfAborted();
     assertEditSnapshots(request);
     const images: File[] = [];
     for (const snapshot of request.images) {
-      images.push(await snapshotToUpload(snapshot));
+      images.push(await snapshotToUpload(snapshot, signal));
     }
 
     const body: OpenAIImageEditBody = {
@@ -374,18 +428,30 @@ export class OpenAIImageClient implements ImageProvider {
     };
     addCompression(body, request);
     if (request.mask !== undefined) {
-      body.mask = await snapshotToUpload(request.mask);
+      body.mask = await snapshotToUpload(request.mask, signal);
     }
-    return this.#invoke(() => this.#sdk.images.edit(body));
+    signal?.throwIfAborted();
+    return this.#invoke(
+      () =>
+        signal === undefined
+          ? this.#sdk.images.edit(body)
+          : this.#sdk.images.edit(body, { signal }),
+      signal,
+    );
   }
 
   async #invoke(
     call: () => OpenAIImageAPIPromise,
+    signal?: AbortSignal,
   ): Promise<ProviderImage> {
+    signal?.throwIfAborted();
     let apiPromise: OpenAIImageAPIPromise;
     try {
       apiPromise = call();
     } catch (error) {
+      if (signal?.aborted) {
+        signal.throwIfAborted();
+      }
       throw mapOpenAIError(error);
     }
 
@@ -396,7 +462,13 @@ export class OpenAIImageClient implements ImageProvider {
     try {
       response = await apiPromise.withResponse();
     } catch (error) {
+      if (signal?.aborted) {
+        signal.throwIfAborted();
+      }
       const rawResponse = await rawResponsePromise;
+      if (signal?.aborted) {
+        signal.throwIfAborted();
+      }
       if (rawResponse?.ok) {
         throw invalidProviderResponse(
           rawResponse.headers.get("x-request-id"),
@@ -404,6 +476,7 @@ export class OpenAIImageClient implements ImageProvider {
       }
       throw mapOpenAIError(error);
     }
+    signal?.throwIfAborted();
     return extractProviderImage(response);
   }
 }

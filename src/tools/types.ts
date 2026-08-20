@@ -1,4 +1,5 @@
 import path from "node:path";
+import { setTimeout as scheduleTimeout } from "node:timers";
 import type { RuntimeConfig } from "../config/environment.ts";
 import type { Semaphore } from "../concurrency.ts";
 import { AppError } from "../errors.ts";
@@ -31,7 +32,10 @@ export const DEFAULT_RELATIVE_OUTPUT_DIRECTORY =
   ".claude/generated-images/gpt-image-2" as const;
 export const INLINE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 
-export type ImageToolWarning = PublicationWarning | "SIZE_MISMATCH";
+export type ImageToolWarning =
+  | PublicationWarning
+  | "SIZE_MISMATCH"
+  | "SNAPSHOT_CLEANUP_PENDING";
 
 export interface StatusOutput {
   readonly model: typeof MODEL;
@@ -83,6 +87,7 @@ export interface ToolOperations {
   readonly snapshotInputs: InputSnapshotter;
   readonly publishOutput: OutputPublisher;
   readonly makeDefaultOutputPath: (format: ImageFormat) => string;
+  readonly deferCleanup: (task: () => Promise<void>) => void;
 }
 
 export interface ToolContext {
@@ -96,6 +101,13 @@ export interface ToolContext {
 
 export type ToolSuccessOutput = StatusOutput | ImageToolOutput;
 
+function deferCleanup(task: () => Promise<void>): void {
+  const timer = scheduleTimeout(() => {
+    void task().catch(() => undefined);
+  }, 1_000);
+  timer.unref();
+}
+
 export function getToolOperations(context: ToolContext): ToolOperations {
   if (context.operations !== undefined) {
     return context.operations;
@@ -106,6 +118,7 @@ export function getToolOperations(context: ToolContext): ToolOperations {
     snapshotInputs,
     publishOutput,
     makeDefaultOutputPath,
+    deferCleanup,
   };
 }
 

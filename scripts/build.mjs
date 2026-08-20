@@ -28,6 +28,7 @@ await build({
   target: "node20",
   bundle: true,
   packages: "bundle",
+  preserveSymlinks: true,
   define: {
     __BUNDLED_WEBP_WASM__: "true",
   },

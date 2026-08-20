@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -7,12 +7,28 @@ import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ListRootsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { Semaphore } from "../src/concurrency.ts";
+import {
+  PAID_CALL_MAX_PENDING,
+  processPaidCallGate,
+  Semaphore,
+} from "../src/concurrency.ts";
+import type { OutputPublisher } from "../src/files/atomic-output.ts";
+import type { InputSnapshotter } from "../src/files/input-snapshot.ts";
+import { WorkspacePaths } from "../src/files/workspace-paths.ts";
 import type { RuntimeConfig } from "../src/config/environment.ts";
+import { AppError } from "../src/errors.ts";
 import { WorkspaceRootRegistry } from "../src/files/workspace-roots.ts";
 import { createSafeLogger } from "../src/logger.ts";
+import type {
+  ImageProvider,
+  ProviderEditRequest,
+  ProviderGenerateRequest,
+  ProviderImage,
+} from "../src/openai/types.ts";
+import { createProcessToolContext } from "../src/process-context.ts";
 import { createImageServer } from "../src/server.ts";
-import type { ToolContext } from "../src/tools/types.ts";
+import type { ToolContext, ToolOperations } from "../src/tools/types.ts";
+import { makePng } from "./helpers/image-fixtures.ts";
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert.equal(typeof value, "object");
@@ -267,6 +283,22 @@ test("initialize without an API key exposes exactly three correctly annotated to
         assert.match(outputSchema, /warnings/);
         assert.match(outputSchema, /isError/);
         assert.doesNotMatch(outputSchema, /\"preview\"/);
+        const imageSchema = asRecord(tool.outputSchema);
+        const success = asArray(imageSchema.oneOf)
+          .map(asRecord)
+          .find((branch) => "model" in asRecord(branch.properties));
+        assert.ok(success);
+        const warningSchema = asRecord(
+          asRecord(asRecord(success.properties).warnings).items,
+        );
+        assert.deepEqual(
+          asArray(warningSchema.enum).map(String).sort(),
+          [
+            "SIZE_MISMATCH",
+            "SNAPSHOT_CLEANUP_PENDING",
+            "TEMP_CLEANUP_PENDING",
+          ].sort(),
+        );
         assertExactOutputSchema(tool.outputSchema, imageSuccessRequired);
       }
 
@@ -390,6 +422,325 @@ test("invalid inputs and missing configuration return stable sanitized structure
     } finally {
       await protocol.close();
     }
+  });
+});
+
+test("MCP cancellation aborts the in-flight provider signal", async () => {
+  await withTemporaryRoots(1, async ([environmentRoot]) => {
+    assert.ok(environmentRoot);
+    const roots = new WorkspaceRootRegistry();
+    await roots.replace([environmentRoot]);
+    let providerSignal: AbortSignal | undefined;
+    let providerAborted = false;
+    let markProviderStarted!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      markProviderStarted = resolve;
+    });
+    let rejectProvider!: (error: unknown) => void;
+    const provider: ImageProvider = {
+      generate(
+        _request: ProviderGenerateRequest,
+        signal?: AbortSignal,
+      ): Promise<ProviderImage> {
+        providerSignal = signal;
+        markProviderStarted();
+        return new Promise((_resolve, reject) => {
+          rejectProvider = reject;
+          signal?.addEventListener(
+            "abort",
+            () => {
+              providerAborted = true;
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        });
+      },
+      edit(
+        _request: ProviderEditRequest,
+        _signal?: AbortSignal,
+      ): Promise<ProviderImage> {
+        throw new Error("edit is not used in this test");
+      },
+    };
+    const protocol = await connectProtocol({
+      context: {
+        ...makeContext(roots, {
+          apiKeyConfigured: true,
+          apiKey: "test-key-protocol-cancellation",
+          baseUrl: "https://api.openai.com/v1",
+          baseUrlConfigured: false,
+          workspaceRoot: environmentRoot,
+        }),
+        provider,
+      },
+      environmentRoot,
+      logs: [],
+    });
+    const controller = new AbortController();
+
+    try {
+      const callOutcome = protocol.client.callTool(
+        {
+          name: "generate_image",
+          arguments: {
+            prompt: "cancel this test request",
+            output_path: "outputs/cancelled.png",
+          },
+        },
+        undefined,
+        { signal: controller.signal },
+      ).then(
+        (value) => value,
+        (error: unknown) => error,
+      );
+      await providerStarted;
+      controller.abort();
+      const clientOutcome = await callOutcome;
+      const abortDeadline = Date.now() + 250;
+      while (!providerAborted && Date.now() < abortDeadline) {
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      const observedSignal = providerSignal;
+      const observedProviderAbort = providerAborted;
+      if (!providerAborted) {
+        rejectProvider(
+          new AppError("PROVIDER_FAILURE", "protocol cancellation test released"),
+        );
+      }
+
+      assert.ok(clientOutcome instanceof Error);
+      assert.ok(observedSignal instanceof AbortSignal);
+      assert.equal(observedSignal.aborted, true);
+      assert.equal(observedProviderAbort, true);
+    } finally {
+      if (!providerAborted && rejectProvider !== undefined) {
+        rejectProvider(
+          new AppError("PROVIDER_FAILURE", "protocol cancellation test cleanup"),
+        );
+      }
+      await protocol.close();
+    }
+  });
+});
+
+test("production paid-call queue enforces its bound, cancellation, and mixed FIFO order", async () => {
+  await withTemporaryRoots(1, async ([environmentRoot]) => {
+    assert.ok(environmentRoot);
+    await writeFile(path.join(environmentRoot, "edit-input.png"), makePng());
+    const roots = new WorkspaceRootRegistry();
+    await roots.replace([environmentRoot]);
+    assert.equal(PAID_CALL_MAX_PENDING, 8);
+    assert.equal(processPaidCallGate.pendingCount, 0);
+    const imageBytes = makePng({ width: 2, height: 2 });
+    const imageBase64 = imageBytes.toString("base64");
+    const starts: string[] = [];
+    let markBlockerStarted!: () => void;
+    const blockerStarted = new Promise<void>((resolve) => {
+      markBlockerStarted = resolve;
+    });
+    let releaseBlocker!: () => void;
+    const blockerReleased = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    const provider: ImageProvider = {
+      async generate(
+        request: ProviderGenerateRequest,
+        _signal?: AbortSignal,
+      ): Promise<ProviderImage> {
+        starts.push(`generate:${request.prompt}`);
+        if (request.prompt === "queue-blocker") {
+          markBlockerStarted();
+          await blockerReleased;
+        }
+        return { base64: imageBase64 };
+      },
+      async edit(
+        request: ProviderEditRequest,
+        _signal?: AbortSignal,
+      ): Promise<ProviderImage> {
+        starts.push(`edit:${request.prompt}`);
+        return { base64: imageBase64 };
+      },
+    };
+    const publisher: OutputPublisher = async (input) => ({
+      relativePath: input.output.relativePath,
+      absolutePath: input.output.absolutePath,
+      filename: path.basename(input.output.absolutePath),
+      info: {
+        format: "png",
+        mimeType: "image/png",
+        width: 2,
+        height: 2,
+        hasAlpha: true,
+      },
+      sizeBytes: imageBytes.length,
+      warnings: [],
+    });
+    const snapshotter: InputSnapshotter = async (resolvedPaths) => ({
+      snapshots: resolvedPaths.map((resolved) => ({
+        originalRelativePath: resolved.relativePath,
+        snapshotPath: path.join(environmentRoot, ".private-test-snapshot"),
+        filename: path.basename(resolved.relativePath),
+        info: {
+          format: "png",
+          mimeType: "image/png",
+          width: 1,
+          height: 1,
+          hasAlpha: true,
+        },
+        sizeBytes: makePng().length,
+      })),
+      async dispose() {},
+    });
+    const operations: ToolOperations = {
+      paths: new WorkspacePaths(roots),
+      snapshotInputs: snapshotter,
+      publishOutput: publisher,
+      makeDefaultOutputPath: () => "outputs/default.png",
+      deferCleanup: () => undefined,
+    };
+    const config: RuntimeConfig = {
+      apiKeyConfigured: true,
+      apiKey: "test-key-production-queue",
+      baseUrl: "https://api.openai.com/v1",
+      baseUrlConfigured: false,
+      workspaceRoot: environmentRoot,
+      pluginDataRoot: path.join(environmentRoot, ".plugin-data"),
+    };
+    const context: ToolContext = {
+      ...createProcessToolContext({
+        config,
+        roots,
+        provider,
+        serverVersion: "0.1.0-test",
+      }),
+      operations,
+    };
+    assert.strictEqual(context.paidCallGate, processPaidCallGate);
+    const gate = context.paidCallGate;
+    const pendingCount = () => gate.pendingCount;
+    const protocol = await connectProtocol({
+      context,
+      environmentRoot,
+      logs: [],
+    });
+    const blockerOutcome = protocol.client.callTool({
+      name: "generate_image",
+      arguments: {
+        prompt: "queue-blocker",
+        output_path: "outputs/blocker.png",
+      },
+    });
+
+    type QueuedOutcome =
+      | { readonly status: "fulfilled"; readonly value: Awaited<typeof blockerOutcome> }
+      | { readonly status: "rejected"; readonly error: unknown };
+    const queued: Array<{
+      readonly label: string;
+      readonly controller: AbortController;
+      readonly outcome: Promise<QueuedOutcome>;
+    }> = [];
+
+    try {
+      await blockerStarted;
+      for (let index = 0; index < PAID_CALL_MAX_PENDING; index += 1) {
+        const isEdit = index % 2 === 1;
+        const label = `${isEdit ? "edit" : "generate"}-queued-${index}`;
+        const controller = new AbortController();
+        const outcome = protocol.client.callTool(
+          isEdit
+            ? {
+                name: "edit_image",
+                arguments: {
+                  prompt: label,
+                  image_paths: ["edit-input.png"],
+                  output_path: `outputs/${label}.png`,
+                },
+              }
+            : {
+                name: "generate_image",
+                arguments: {
+                  prompt: label,
+                  output_path: `outputs/${label}.png`,
+                },
+              },
+          undefined,
+          { signal: controller.signal },
+        ).then<QueuedOutcome, QueuedOutcome>(
+          (value) => ({ status: "fulfilled", value }),
+          (error: unknown) => ({ status: "rejected", error }),
+        );
+        queued.push({ label, controller, outcome });
+        await waitFor(
+          () => pendingCount() === index + 1,
+          `paid-call request ${index} did not enter the production queue`,
+        );
+      }
+
+      const overflow = await protocol.client.callTool(
+        {
+          name: "generate_image",
+          arguments: {
+            prompt: "queue-overflow",
+            output_path: "outputs/overflow.png",
+          },
+        },
+        undefined,
+        { signal: AbortSignal.timeout(1_000) },
+      );
+      assert.equal(overflow.isError, true);
+      assert.deepEqual(overflow.structuredContent, {
+        isError: true,
+        code: "RATE_LIMITED",
+        message: "RATE_LIMITED: Too many paid image requests are already queued",
+      });
+      assert.deepEqual(starts, ["generate:queue-blocker"]);
+      assert.equal(pendingCount(), PAID_CALL_MAX_PENDING);
+
+      const canceledIndex = 3;
+      queued[canceledIndex]!.controller.abort();
+      const canceled = await queued[canceledIndex]!.outcome;
+      assert.equal(canceled.status, "rejected");
+      if (canceled.status === "rejected") {
+        assert.ok(canceled.error instanceof Error);
+      }
+      await waitFor(
+        () => pendingCount() === PAID_CALL_MAX_PENDING - 1,
+        "canceled request remained in the production queue",
+      );
+
+      releaseBlocker();
+      const blocker = await blockerOutcome;
+      assert.equal(blocker.isError, undefined);
+      const survivors = await Promise.all(
+        queued
+          .filter((_entry, index) => index !== canceledIndex)
+          .map((entry) => entry.outcome),
+      );
+      assert.equal(
+        survivors.every(
+          (outcome) =>
+            outcome.status === "fulfilled" && outcome.value.isError === undefined,
+        ),
+        true,
+      );
+      assert.deepEqual(starts, [
+        "generate:queue-blocker",
+        ...queued
+          .filter((_entry, index) => index !== canceledIndex)
+          .map((entry) => {
+            const prefix = entry.label.startsWith("edit-") ? "edit" : "generate";
+            return `${prefix}:${entry.label}`;
+          }),
+      ]);
+      assert.equal(starts.includes("generate:queue-overflow"), false);
+    } finally {
+      releaseBlocker();
+      await Promise.allSettled([blockerOutcome, ...queued.map((entry) => entry.outcome)]);
+      await protocol.close();
+    }
+    assert.equal(gate.pendingCount, 0);
   });
 });
 

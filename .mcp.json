@@ -6,6 +6,11 @@
       "env": {
         "OPENAI_API_KEY": "${user_config.openai_api_key}",
         "OPENAI_BASE_URL": "${user_config.openai_base_url}",
+        "OPENAI_ADMIN_KEY": "",
+        "OPENAI_ORG_ID": "",
+        "OPENAI_PROJECT_ID": "",
+        "OPENAI_WEBHOOK_SECRET": "",
+        "OPENAI_CUSTOM_HEADERS": "",
         "GPT_IMAGE_WORKSPACE_ROOT": "${CLAUDE_PROJECT_DIR}",
         "GPT_IMAGE_PLUGIN_DATA": "${CLAUDE_PLUGIN_DATA}"
       }

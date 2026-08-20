@@ -1,6 +1,6 @@
 {
   "name": "gpt-image-2",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generate and edit project images with OpenAI GPT Image 2 through a bundled local MCP server.",
   "author": {
     "name": "KPK"
@@ -18,7 +18,7 @@
       "title": "OpenAI API key",
       "description": "API key used only by the local GPT Image 2 MCP server. Stored in Claude's sensitive plugin configuration.",
       "sensitive": true,
-      "required": true
+      "required": false
     },
     "openai_base_url": {
       "type": "string",

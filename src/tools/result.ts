@@ -31,6 +31,46 @@ export interface BuildImageToolOutputOptions {
   readonly published: PublishedImage;
 }
 
+function isUnsafeResultTextCharacter(character: string): boolean {
+  const codePoint = character.codePointAt(0)!;
+  return (
+    codePoint <= 0x1f ||
+    (codePoint >= 0x7f && codePoint <= 0x9f) ||
+    codePoint === 0x061c ||
+    codePoint === 0x200e ||
+    codePoint === 0x200f ||
+    codePoint === 0x2028 ||
+    codePoint === 0x2029 ||
+    (codePoint >= 0x202a && codePoint <= 0x202e) ||
+    (codePoint >= 0x2066 && codePoint <= 0x2069)
+  );
+}
+
+function formatUntrustedInlineData(value: string): string {
+  let escaped = "";
+  for (const character of value) {
+    if (isUnsafeResultTextCharacter(character)) {
+      const codePoint = character.codePointAt(0)!;
+      escaped += `\\u${codePoint.toString(16).padStart(4, "0")}`;
+    } else {
+      escaped += character;
+    }
+  }
+
+  let longestBacktickRun = 0;
+  let currentBacktickRun = 0;
+  for (const character of escaped) {
+    if (character === "`") {
+      currentBacktickRun += 1;
+      longestBacktickRun = Math.max(longestBacktickRun, currentBacktickRun);
+    } else {
+      currentBacktickRun = 0;
+    }
+  }
+  const delimiter = "`".repeat(longestBacktickRun + 1);
+  return `${delimiter} ${escaped} ${delimiter}`;
+}
+
 function readNonNegativeInteger(value: unknown): number | undefined {
   return typeof value === "number" &&
     Number.isSafeInteger(value) &&
@@ -188,7 +228,7 @@ export function toMcpSuccess(output: ToolSuccessOutput): CallToolResult {
   const content: CallToolResult["content"] = [
     {
       type: "text",
-      text: `Saved ${output.model} image to ${output.relative_path} (${output.actual_width}x${output.actual_height}, ${output.format}, ${output.size_bytes} bytes).${warningSuffix}`,
+      text: `Saved ${output.model} image to ${formatUntrustedInlineData(output.relative_path)} (${output.actual_width}x${output.actual_height}, ${output.format}, ${output.size_bytes} bytes).${warningSuffix}`,
     },
   ];
   if (output.preview_included && output.preview !== undefined) {

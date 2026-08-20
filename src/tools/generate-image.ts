@@ -13,6 +13,7 @@ import {
 export async function generateImage(
   input: GenerateImageInput,
   context: ToolContext,
+  signal?: AbortSignal,
 ): Promise<ImageToolOutput> {
   const provider = requireImageProvider(context);
   const operations = getToolOperations(context);
@@ -21,12 +22,6 @@ export async function generateImage(
     input.output_format,
     operations,
   );
-  const output = await operations.paths.resolveOutput(
-    requestedOutputPath,
-    input.workspace_root,
-  );
-  assertOutputFormat(output, input.output_format);
-
   const request: ProviderGenerateRequest = {
     prompt: input.prompt,
     quality: input.quality,
@@ -38,20 +33,30 @@ export async function generateImage(
     moderation: input.moderation,
   };
 
-  const providerImage = await context.paidCallGate.runExclusive(() =>
-    provider.generate(request),
-  );
-  const published = await operations.publishOutput({
-    output,
-    base64: providerImage.base64,
-    format: input.output_format,
-  });
+  return context.paidCallGate.runExclusive(async () => {
+    signal?.throwIfAborted();
+    const output = await operations.paths.resolveOutput(
+      requestedOutputPath,
+      input.workspace_root,
+    );
+    assertOutputFormat(output, input.output_format);
+    signal?.throwIfAborted();
 
-  return buildImageToolOutput({
-    requestedSize: input.size,
-    quality: input.quality,
-    output,
-    providerImage,
-    published,
-  });
+    const providerImage = await provider.generate(request, signal);
+    signal?.throwIfAborted();
+    const published = await operations.publishOutput({
+      output,
+      base64: providerImage.base64,
+      format: input.output_format,
+      ...(signal === undefined ? {} : { signal }),
+    });
+
+    return buildImageToolOutput({
+      requestedSize: input.size,
+      quality: input.quality,
+      output,
+      providerImage,
+      published,
+    });
+  }, signal);
 }

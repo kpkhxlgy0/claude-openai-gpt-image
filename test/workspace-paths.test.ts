@@ -5,7 +5,13 @@ import path from "node:path";
 import test from "node:test";
 import { AppError } from "../src/errors.ts";
 import { WorkspacePaths } from "../src/files/workspace-paths.ts";
-import { WorkspaceRootRegistry } from "../src/files/workspace-roots.ts";
+import {
+  createCanonicalPathOps,
+  deduplicateCanonicalRoots,
+  selectApprovedWorkspaceRoot,
+  type WorkspaceRoot,
+  WorkspaceRootRegistry,
+} from "../src/files/workspace-roots.ts";
 import { assertPortableRelativePath } from "../src/files/windows-paths.ts";
 
 async function withTempRoots(
@@ -96,11 +102,115 @@ test("assertPortableRelativePath rejects Windows absolute, UNC, device, ADS, res
   }
 });
 
-test("WorkspaceRootRegistry realpaths, deduplicates case-insensitively, and never grants via select", async () => {
+test("assertPortableRelativePath rejects control, line-separator, and bidirectional formatting characters", () => {
+  for (const value of [
+    "folder/line\nbreak.png",
+    "folder/tab\tname.png",
+    `folder/delete${String.fromCodePoint(0x7f)}name.png`,
+    `folder/c1${String.fromCodePoint(0x85)}name.png`,
+    `folder/line${String.fromCodePoint(0x2028)}separator.png`,
+    `folder/paragraph${String.fromCodePoint(0x2029)}separator.png`,
+    `folder/arabic-mark${String.fromCodePoint(0x061c)}name.png`,
+    `folder/left-mark${String.fromCodePoint(0x200e)}name.png`,
+    `folder/right-mark${String.fromCodePoint(0x200f)}name.png`,
+    `folder/override${String.fromCodePoint(0x202e)}name.png`,
+    `folder/isolate${String.fromCodePoint(0x2066)}name.png`,
+  ]) {
+    assert.throws(
+      () => assertPortableRelativePath(value),
+      (error: unknown) =>
+        error instanceof AppError && error.code === "PATH_OUTSIDE_WORKSPACE",
+      JSON.stringify(value),
+    );
+  }
+});
+
+test("resolveInput rejects unsafe text in absolute input paths", async () => {
+  await withTempRoots(1, async (roots, _registry, paths) => {
+    const unsafeAbsolute = path.join(roots[0]!, "line\nbreak.png");
+    await assert.rejects(
+      () => paths.resolveInput(unsafeAbsolute),
+      (error: unknown) =>
+        error instanceof AppError && error.code === "PATH_OUTSIDE_WORKSPACE",
+    );
+  });
+});
+
+test("canonical Windows authorization identity preserves case", () => {
+  const operations = createCanonicalPathOps(path.win32);
+  const approved = "C:\\base\\Safe";
+
+  assert.equal(operations.isSame(approved, "C:\\base\\safe"), false);
+  assert.equal(operations.contains(approved, "C:\\base\\safe"), false);
+  assert.equal(
+    operations.contains(approved, "C:\\base\\safe\\secret.png"),
+    false,
+  );
+  assert.equal(
+    operations.contains(approved, "C:\\base\\Safe\\secret.png"),
+    true,
+  );
+  assert.equal(
+    operations.contains(approved, "C:\\base\\Safe-evil\\secret.png"),
+    false,
+  );
+});
+
+test("canonical root deduplication retains case-distinct Windows roots", () => {
+  const roots: WorkspaceRoot[] = [
+    { displayPath: "C:\\base\\Safe", canonicalPath: "C:\\base\\Safe" },
+    { displayPath: "C:\\base\\safe", canonicalPath: "C:\\base\\safe" },
+    { displayPath: "C:\\base\\Safe\\.", canonicalPath: "C:\\base\\Safe" },
+  ];
+
+  const deduplicated = deduplicateCanonicalRoots(
+    roots,
+    createCanonicalPathOps(path.win32),
+  );
+  assert.deepEqual(
+    deduplicated.map((root) => root.canonicalPath),
+    ["C:\\base\\Safe", "C:\\base\\safe"],
+  );
+});
+
+test("Windows root selector prefers exact identity and folds case only when unique", () => {
+  const upper: WorkspaceRoot = {
+    displayPath: "C:\\base\\Safe",
+    canonicalPath: "C:\\base\\Safe",
+  };
+  const lower: WorkspaceRoot = {
+    displayPath: "C:\\base\\safe",
+    canonicalPath: "C:\\base\\safe",
+  };
+  const policy = {
+    pathOperations: createCanonicalPathOps(path.win32),
+    caseInsensitiveFallback: true,
+  };
+
+  assert.equal(
+    selectApprovedWorkspaceRoot([upper, lower], "C:\\base\\Safe", policy),
+    upper,
+  );
+  assert.equal(
+    selectApprovedWorkspaceRoot([upper, lower], "C:\\base\\safe", policy),
+    lower,
+  );
+  assert.equal(
+    selectApprovedWorkspaceRoot([upper], "C:\\BASE\\SAFE", policy),
+    upper,
+  );
+  assert.throws(
+    () => selectApprovedWorkspaceRoot([upper, lower], "C:\\base\\SAFE", policy),
+    (error: unknown) =>
+      error instanceof AppError && error.code === "WORKSPACE_ROOT_REQUIRED",
+  );
+});
+
+test("WorkspaceRootRegistry realpaths canonical aliases and never grants via select", async () => {
   await withTempRoots(1, async (roots, registry) => {
     const root = roots[0]!;
     const viaAlias = path.join(root, ".");
-    await registry.replace([root, viaAlias, root.toUpperCase()]);
+    await registry.replace([root, viaAlias]);
     const listed = registry.list();
     assert.equal(listed.length, 1);
     assert.equal(path.resolve(listed[0]!.canonicalPath), path.resolve(root));

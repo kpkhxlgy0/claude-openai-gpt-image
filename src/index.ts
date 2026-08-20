@@ -1,14 +1,13 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { loadEnvironment } from "./config/environment.ts";
-import { processPaidCallGate } from "./concurrency.ts";
 import { toErrorResult } from "./errors.ts";
 import { WorkspaceRootRegistry } from "./files/workspace-roots.ts";
 import { createSafeLogger } from "./logger.ts";
 import { OpenAIImageClient } from "./openai/openai-image-client.ts";
+import { createProcessToolContext } from "./process-context.ts";
 import { createImageServer } from "./server.ts";
-import type { ToolContext } from "./tools/types.ts";
 
-const SERVER_VERSION = "0.1.0";
+const SERVER_VERSION = "0.1.1";
 const logger = createSafeLogger();
 
 async function main(): Promise<void> {
@@ -34,13 +33,12 @@ async function main(): Promise<void> {
           baseURL: config.baseUrl,
         })
       : undefined;
-  const context: ToolContext = {
+  const context = createProcessToolContext({
     config,
     roots,
     ...(provider === undefined ? {} : { provider }),
-    paidCallGate: processPaidCallGate,
     serverVersion: SERVER_VERSION,
-  };
+  });
   const server = createImageServer({
     context,
     logger,

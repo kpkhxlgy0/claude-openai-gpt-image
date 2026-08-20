@@ -29,6 +29,32 @@ function reject(message: string): never {
   throw new AppError("PATH_OUTSIDE_WORKSPACE", message);
 }
 
+function isUnsafePathTextCharacter(character: string): boolean {
+  const codePoint = character.codePointAt(0)!;
+  return (
+    codePoint <= 0x1f ||
+    (codePoint >= 0x7f && codePoint <= 0x9f) ||
+    codePoint === 0x061c ||
+    codePoint === 0x200e ||
+    codePoint === 0x200f ||
+    codePoint === 0x2028 ||
+    codePoint === 0x2029 ||
+    (codePoint >= 0x202a && codePoint <= 0x202e) ||
+    (codePoint >= 0x2066 && codePoint <= 0x2069)
+  );
+}
+
+export function assertSafePathText(value: string): void {
+  if (value.includes("\0")) {
+    reject("Path must not contain NUL bytes");
+  }
+  for (const character of value) {
+    if (isUnsafePathTextCharacter(character)) {
+      reject("Path must not contain control or bidirectional formatting characters");
+    }
+  }
+}
+
 /**
  * Reject dangerous Windows path spellings portably, before any OS-specific
  * resolution. Separators are normalized only after lexical rejection.
@@ -40,9 +66,7 @@ export function assertPortableRelativePath(value: string): void {
   if (value.length === 0 || value.trim().length === 0) {
     throw new AppError("INVALID_INPUT", "Path must not be empty");
   }
-  if (value.includes("\0")) {
-    reject("Path must not contain NUL bytes");
-  }
+  assertSafePathText(value);
 
   // Reject absolute/device/UNC forms before separator normalization.
   if (value.startsWith("/") || value.startsWith("\\")) {
@@ -51,7 +75,7 @@ export function assertPortableRelativePath(value: string): void {
   if (/^[A-Za-z]:/.test(value)) {
     reject("Drive-prefixed paths are not allowed as relative paths");
   }
-  if (value.includes(":") ) {
+  if (value.includes(":")) {
     // Alternate data streams and any remaining colon forms.
     reject("Path must not contain alternate data stream colons");
   }

@@ -9,6 +9,7 @@ import {
   type FileHandle,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { setTimeout as scheduleTimeout } from "node:timers";
 import path from "node:path";
 import { AppError } from "../errors.ts";
 import { inspectImage } from "../images/inspect-image.ts";
@@ -35,12 +36,21 @@ export interface InputSnapshotSet {
 }
 
 export interface InputSnapshotOperations {
+  readInput(
+    handle: FileHandle,
+    buffer: Buffer,
+    offset: number,
+    length: number,
+    position: number,
+  ): Promise<{ readonly bytesRead: number }>;
   removeSnapshotDirectory(snapshotDirectory: string): Promise<void>;
+  deferCleanup(task: () => Promise<void>): void;
 }
 
 export type InputSnapshotter = (
   paths: readonly ResolvedInputPath[],
   pluginDataRoot?: string,
+  signal?: AbortSignal,
 ) => Promise<InputSnapshotSet>;
 
 interface OpenInput {
@@ -66,11 +76,14 @@ async function closeAll(inputs: readonly OpenInput[]): Promise<void> {
 async function assertOpenedInputContained(
   resolved: ResolvedInputPath,
   handleStats: Awaited<ReturnType<FileHandle["stat"]>>,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   let canonicalPath: string;
   let pathStats;
   try {
     canonicalPath = await realpath(resolved.absolutePath);
+    signal?.throwIfAborted();
     if (!isPathInsideRoot(resolved.root.canonicalPath, canonicalPath)) {
       throw new AppError(
         "PATH_OUTSIDE_WORKSPACE",
@@ -78,7 +91,9 @@ async function assertOpenedInputContained(
       );
     }
     pathStats = await stat(canonicalPath, { bigint: true });
+    signal?.throwIfAborted();
   } catch (error) {
+    signal?.throwIfAborted();
     if (error instanceof AppError) {
       throw error;
     }
@@ -103,22 +118,27 @@ async function assertOpenedInputContained(
 
 async function openValidatedInput(
   resolved: ResolvedInputPath,
+  signal?: AbortSignal,
 ): Promise<OpenInput> {
+  signal?.throwIfAborted();
   let handle: FileHandle;
   try {
     handle = await open(resolved.absolutePath, "r");
   } catch (error) {
+    signal?.throwIfAborted();
     throw new AppError("INPUT_FILE_INVALID", "Input file could not be opened", {
       cause: error,
     });
   }
 
   try {
+    signal?.throwIfAborted();
     const stats = await handle.stat({ bigint: true });
+    signal?.throwIfAborted();
     if (!stats.isFile()) {
       invalidInput("Input path must refer to a regular file");
     }
-    await assertOpenedInputContained(resolved, stats);
+    await assertOpenedInputContained(resolved, stats, signal);
     if (stats.size > BigInt(MAX_INPUT_BYTES)) {
       invalidInput("Input file exceeds the 50 MiB limit");
     }
@@ -132,6 +152,7 @@ async function openValidatedInput(
     };
   } catch (error) {
     await handle.close().catch(() => undefined);
+    signal?.throwIfAborted();
     if (error instanceof AppError) {
       throw error;
     }
@@ -145,13 +166,15 @@ async function openValidatedInput(
 
 async function openAndMeasureInputs(
   paths: readonly ResolvedInputPath[],
+  signal?: AbortSignal,
 ): Promise<OpenInput[]> {
   const opened: OpenInput[] = [];
   let aggregateBytes = 0;
 
   try {
     for (const resolved of paths) {
-      const input = await openValidatedInput(resolved);
+      signal?.throwIfAborted();
+      const input = await openValidatedInput(resolved, signal);
       aggregateBytes += input.sizeBytes;
       if (aggregateBytes > MAX_AGGREGATE_INPUT_BYTES) {
         await input.handle.close().catch(() => undefined);
@@ -159,9 +182,11 @@ async function openAndMeasureInputs(
       }
       opened.push(input);
     }
+    signal?.throwIfAborted();
     return opened;
   } catch (error) {
     await closeAll(opened);
+    signal?.throwIfAborted();
     throw error;
   }
 }
@@ -171,15 +196,18 @@ async function writeAll(
   buffer: Buffer,
   length: number,
   position: number,
+  signal?: AbortSignal,
 ): Promise<void> {
   let written = 0;
   while (written < length) {
+    signal?.throwIfAborted();
     const result = await handle.write(
       buffer,
       written,
       length - written,
       position + written,
     );
+    signal?.throwIfAborted();
     if (result.bytesWritten === 0) {
       invalidInput("Snapshot file could not be written completely");
     }
@@ -190,11 +218,15 @@ async function writeAll(
 async function copyStableInput(
   input: OpenInput,
   snapshotPath: string,
+  operations: InputSnapshotOperations,
+  signal?: AbortSignal,
 ): Promise<void> {
+  signal?.throwIfAborted();
   let destination: FileHandle;
   try {
     destination = await open(snapshotPath, "wx", 0o600);
   } catch (error) {
+    signal?.throwIfAborted();
     throw snapshotStorageFailure(
       "Snapshot file could not be created safely",
       error,
@@ -202,32 +234,45 @@ async function copyStableInput(
   }
 
   try {
+    signal?.throwIfAborted();
     const buffer = Buffer.allocUnsafe(
       Math.max(1, Math.min(COPY_BUFFER_BYTES, input.sizeBytes)),
     );
     let position = 0;
     while (position < input.sizeBytes) {
+      signal?.throwIfAborted();
       const length = Math.min(buffer.length, input.sizeBytes - position);
-      const { bytesRead } = await input.handle.read(buffer, 0, length, position);
+      const { bytesRead } = await operations.readInput(
+        input.handle,
+        buffer,
+        0,
+        length,
+        position,
+      );
+      signal?.throwIfAborted();
       if (bytesRead === 0) {
         invalidInput("Input file changed while it was being copied");
       }
-      await writeAll(destination, buffer, bytesRead, position);
+      await writeAll(destination, buffer, bytesRead, position, signal);
       position += bytesRead;
     }
 
+    signal?.throwIfAborted();
     const extra = Buffer.allocUnsafe(1);
-    const { bytesRead: extraBytes } = await input.handle.read(
+    const { bytesRead: extraBytes } = await operations.readInput(
+      input.handle,
       extra,
       0,
       1,
       input.sizeBytes,
     );
+    signal?.throwIfAborted();
     if (extraBytes !== 0) {
       invalidInput("Input file changed while it was being copied");
     }
 
     const finalStats = await input.handle.stat({ bigint: true });
+    signal?.throwIfAborted();
     if (
       finalStats.size !== BigInt(input.sizeBytes) ||
       finalStats.mtimeNs !== input.initialMtimeNs ||
@@ -236,6 +281,7 @@ async function copyStableInput(
       invalidInput("Input file changed while it was being copied");
     }
   } catch (error) {
+    signal?.throwIfAborted();
     if (error instanceof AppError) {
       throw error;
     }
@@ -287,15 +333,20 @@ async function snapshotInputsWithOperations(
   paths: readonly ResolvedInputPath[],
   pluginDataRoot: string | undefined,
   operations: InputSnapshotOperations,
+  signal?: AbortSignal,
 ): Promise<InputSnapshotSet> {
-  const opened = await openAndMeasureInputs(paths);
+  signal?.throwIfAborted();
+  const opened = await openAndMeasureInputs(paths, signal);
   let snapshotDirectory: string | undefined;
 
   try {
+    signal?.throwIfAborted();
     if (pluginDataRoot !== undefined) {
       try {
         await mkdir(pluginDataRoot, { recursive: true, mode: 0o700 });
+        signal?.throwIfAborted();
       } catch (error) {
+        signal?.throwIfAborted();
         throw snapshotStorageFailure(
           "Snapshot storage directory could not be prepared safely",
           error,
@@ -307,26 +358,33 @@ async function snapshotInputsWithOperations(
         path.join(pluginDataRoot ?? tmpdir(), ".gpt-image-input-"),
       );
     } catch (error) {
+      signal?.throwIfAborted();
       throw snapshotStorageFailure(
         "Snapshot storage directory could not be created safely",
         error,
       );
     }
+    signal?.throwIfAborted();
 
     const snapshots: InputSnapshot[] = [];
     for (const [index, input] of opened.entries()) {
+      signal?.throwIfAborted();
       const snapshotPath = path.join(snapshotDirectory, `${index}.snapshot`);
-      await copyStableInput(input, snapshotPath);
+      await copyStableInput(input, snapshotPath, operations, signal);
       let bytes: Buffer;
       try {
+        signal?.throwIfAborted();
         bytes = await readFile(snapshotPath);
+        signal?.throwIfAborted();
       } catch (error) {
+        signal?.throwIfAborted();
         throw snapshotStorageFailure(
           "Input snapshot could not be read for validation",
           error,
         );
       }
       const info = Object.freeze({ ...(await inspectImage(bytes)) });
+      signal?.throwIfAborted();
       snapshots.push(
         Object.freeze({
           originalRelativePath: input.resolved.relativePath,
@@ -338,18 +396,23 @@ async function snapshotInputsWithOperations(
       );
     }
 
+    signal?.throwIfAborted();
     return createSnapshotSet(snapshotDirectory, snapshots, operations);
   } catch (error) {
     if (snapshotDirectory !== undefined) {
       try {
         await operations.removeSnapshotDirectory(snapshotDirectory);
-      } catch (cleanupError) {
-        throw snapshotStorageFailure(
-          "Partial input snapshots could not be removed safely",
-          cleanupError,
-        );
+      } catch {
+        try {
+          operations.deferCleanup(() =>
+            operations.removeSnapshotDirectory(snapshotDirectory!),
+          );
+        } catch {
+          // Preserve the operation outcome even if cleanup cannot be queued.
+        }
       }
     }
+    signal?.throwIfAborted();
     throw error;
   } finally {
     await closeAll(opened);
@@ -357,7 +420,15 @@ async function snapshotInputsWithOperations(
 }
 
 const nodeSnapshotOperations: InputSnapshotOperations = {
+  readInput: (handle, buffer, offset, length, position) =>
+    handle.read(buffer, offset, length, position),
   removeSnapshotDirectory,
+  deferCleanup(task) {
+    const timer = scheduleTimeout(() => {
+      void task().catch(() => undefined);
+    }, 1_000);
+    timer.unref();
+  },
 };
 
 export function createInputSnapshotter(
@@ -367,8 +438,8 @@ export function createInputSnapshotter(
     ...nodeSnapshotOperations,
     ...overrides,
   };
-  return (paths, pluginDataRoot) =>
-    snapshotInputsWithOperations(paths, pluginDataRoot, operations);
+  return (paths, pluginDataRoot, signal) =>
+    snapshotInputsWithOperations(paths, pluginDataRoot, operations, signal);
 }
 
 export const snapshotInputs: InputSnapshotter = createInputSnapshotter();

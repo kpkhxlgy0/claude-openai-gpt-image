@@ -34,6 +34,7 @@ export interface PublishOutputOptions {
   output: ResolvedOutputPath;
   base64: string;
   format: ImageFormat;
+  signal?: AbortSignal;
 }
 
 export type PublicationWarning = "TEMP_CLEANUP_PENDING";
@@ -349,9 +350,12 @@ async function publishOutputWithOperations(
   options: PublishOutputOptions,
   operations: OutputPublicationOperations,
 ): Promise<PublishedImage> {
+  options.signal?.throwIfAborted();
   assertOutputExtension(options.output, options.format);
   const bytes = decodeStrictBase64(options.base64, MAX_IMAGE_BYTES);
+  options.signal?.throwIfAborted();
   const canonicalParent = await canonicalOutputParent(options.output);
+  options.signal?.throwIfAborted();
   const filename = path.basename(options.output.absolutePath);
   const finalPath = path.join(canonicalParent, filename);
 
@@ -360,6 +364,7 @@ async function publishOutputWithOperations(
   }
 
   await assertDestinationAbsent(finalPath);
+  options.signal?.throwIfAborted();
 
   let tempPath: string | undefined;
   let publicationCommitted = false;
@@ -371,9 +376,12 @@ async function publishOutputWithOperations(
       canonicalParent,
       bytes,
     );
+    options.signal?.throwIfAborted();
 
     const info = await validateProviderSnapshot(tempPath, options.format);
+    options.signal?.throwIfAborted();
     await recheckCanonicalParent(options.output, canonicalParent);
+    options.signal?.throwIfAborted();
     await publishHardLink(operations, tempPath, finalPath);
     publicationCommitted = true;
     published = {

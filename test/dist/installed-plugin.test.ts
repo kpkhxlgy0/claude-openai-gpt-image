@@ -78,7 +78,7 @@ function sanitizedEnvironment(
 ): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {
     OPENAI_API_KEY: "",
-    OPENAI_BASE_URL: "",
+    OPENAI_BASE_URL: "https://api.openai.com/v1",
     GPT_IMAGE_WORKSPACE_ROOT: workspaceRoot,
     GPT_IMAGE_PLUGIN_DATA: pluginDataRoot,
     HOME: homeRoot,
@@ -177,6 +177,21 @@ test("Git-index marketplace copy decodes WebP and serves free status without nod
       isMissingFile,
     );
 
+    const plugin = JSON.parse(
+      await readFile(
+        path.join(installedRoot, ".claude-plugin", "plugin.json"),
+        "utf8",
+      ),
+    ) as {
+      version?: unknown;
+      userConfig?: {
+        openai_api_key?: { sensitive?: unknown; required?: unknown };
+      };
+    };
+    assert.equal(plugin.version, "0.1.1");
+    assert.equal(plugin.userConfig?.openai_api_key?.sensitive, true);
+    assert.equal(plugin.userConfig?.openai_api_key?.required, false);
+
     const mcp: unknown = JSON.parse(
       await readFile(path.join(installedRoot, ".mcp.json"), "utf8"),
     );
@@ -188,6 +203,11 @@ test("Git-index marketplace copy decodes WebP and serves free status without nod
           env: {
             OPENAI_API_KEY: "${user_config.openai_api_key}",
             OPENAI_BASE_URL: "${user_config.openai_base_url}",
+            OPENAI_ADMIN_KEY: "",
+            OPENAI_ORG_ID: "",
+            OPENAI_PROJECT_ID: "",
+            OPENAI_WEBHOOK_SECRET: "",
+            OPENAI_CUSTOM_HEADERS: "",
             GPT_IMAGE_WORKSPACE_ROOT: "${CLAUDE_PROJECT_DIR}",
             GPT_IMAGE_PLUGIN_DATA: "${CLAUDE_PLUGIN_DATA}",
           },
@@ -336,6 +356,7 @@ test("Git-index marketplace copy decodes WebP and serves free status without nod
     assert.equal(callResult?.isError, undefined);
     const structured = callResult?.structuredContent;
     assert.equal(structured?.model, "gpt-image-2");
+    assert.equal(structured?.server_version, "0.1.1");
     assert.equal(structured?.api_key_configured, false);
     assert.equal(structured?.base_url_configured, false);
     assert.equal(structured?.base_url_valid, true);

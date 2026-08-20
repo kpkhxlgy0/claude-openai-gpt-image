@@ -18,13 +18,14 @@ test("API key is sensitive and MCP uses plugin substitutions", async () => {
 test("plugin identity and approved userConfig fields", async () => {
   const plugin = await json(".claude-plugin/plugin.json");
   assert.equal(plugin.name, "gpt-image-2");
-  assert.equal(plugin.version, "0.1.0");
+  assert.equal(plugin.version, "0.1.1");
   assert.equal(plugin.author.name, "KPK");
   assert.deepEqual(Object.keys(plugin.userConfig).sort(), [
     "openai_api_key",
     "openai_base_url",
   ]);
-  assert.equal(plugin.userConfig.openai_api_key.required, true);
+  assert.equal(plugin.userConfig.openai_api_key.required, false);
+  assert.equal(plugin.userConfig.openai_api_key.sensitive, true);
   assert.equal(plugin.userConfig.openai_api_key.type, "string");
   assert.equal(plugin.userConfig.openai_base_url.required, false);
   assert.equal(plugin.userConfig.openai_base_url.type, "string");
@@ -34,7 +35,7 @@ test("plugin identity and approved userConfig fields", async () => {
   );
 });
 
-test("MCP env wires Base URL and plugin data substitutions", async () => {
+test("MCP env wires Base URL and plugin data substitutions while clearing ambient SDK settings", async () => {
   const mcp = await json(".mcp.json");
   assert.equal(mcp.mcpServers.images.command, "node");
   assert.equal(
@@ -45,4 +46,13 @@ test("MCP env wires Base URL and plugin data substitutions", async () => {
     mcp.mcpServers.images.env.GPT_IMAGE_PLUGIN_DATA,
     "${CLAUDE_PLUGIN_DATA}",
   );
+  for (const name of [
+    "OPENAI_ADMIN_KEY",
+    "OPENAI_ORG_ID",
+    "OPENAI_PROJECT_ID",
+    "OPENAI_WEBHOOK_SECRET",
+    "OPENAI_CUSTOM_HEADERS",
+  ]) {
+    assert.equal(mcp.mcpServers.images.env[name], "", name);
+  }
 });

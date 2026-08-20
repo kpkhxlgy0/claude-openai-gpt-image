@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { Images } from "openai/resources/images";
 import { toErrorResult, AppError, type ErrorCode } from "../src/errors.ts";
 import {
   OpenAIImageClient,
@@ -11,6 +12,7 @@ import {
   type OpenAIImageClientOptions,
   type OpenAIImageEditBody,
   type OpenAIImageGenerateBody,
+  type OpenAIImageRequestOptions,
   type OpenAIImageSDK,
   type OpenAIImagesResponse,
 } from "../src/openai/openai-image-client.ts";
@@ -23,6 +25,10 @@ import type {
 interface FakeSDKState {
   readonly generateBodies: OpenAIImageGenerateBody[];
   readonly editBodies: OpenAIImageEditBody[];
+  readonly generateSignals: (AbortSignal | undefined)[];
+  readonly editSignals: (AbortSignal | undefined)[];
+  readonly generateArgumentCounts: number[];
+  readonly editArgumentCounts: number[];
 }
 
 interface FakeSDKBehavior {
@@ -78,19 +84,36 @@ function createFakeSDK(behavior: FakeSDKBehavior = {}): {
 } {
   const generateBodies: OpenAIImageGenerateBody[] = [];
   const editBodies: OpenAIImageEditBody[] = [];
+  const generateSignals: (AbortSignal | undefined)[] = [];
+  const editSignals: (AbortSignal | undefined)[] = [];
+  const generateArgumentCounts: number[] = [];
+  const editArgumentCounts: number[] = [];
   const success = () =>
     apiSuccess({ created: 1, data: [{ b64_json: "aW1hZ2U=" }] });
 
   return {
-    state: { generateBodies, editBodies },
+    state: {
+      generateBodies,
+      editBodies,
+      generateSignals,
+      editSignals,
+      generateArgumentCounts,
+      editArgumentCounts,
+    },
     sdk: {
       images: {
-        generate(body) {
+        generate(...args) {
+          const [body, options] = args;
+          generateArgumentCounts.push(args.length);
           generateBodies.push(body);
+          generateSignals.push(options?.signal);
           return (behavior.generate ?? success)();
         },
-        edit(body) {
+        edit(...args) {
+          const [body, options] = args;
+          editArgumentCounts.push(args.length);
           editBodies.push(body);
+          editSignals.push(options?.signal);
           return (behavior.edit ?? success)();
         },
       },
@@ -212,6 +235,10 @@ test("constructs one SDK client with validated no-retry and disabled-logging opt
   assert.equal(options.baseURL, "https://provider.example.test/v1");
   assert.equal(options.maxRetries, 0);
   assert.equal(options.logLevel, "off");
+  assert.equal(options.adminAPIKey, null);
+  assert.equal(options.organization, null);
+  assert.equal(options.project, null);
+  assert.equal(options.webhookSecret, null);
   assert.deepEqual(options.fetchOptions, { redirect: "error" });
   assert.equal(typeof options.logger.error, "function");
   assert.equal(typeof options.logger.warn, "function");
@@ -257,6 +284,115 @@ test("generate maps validated fields and extracts one Base64 image, usage, and r
     requestId: "req_generate-123.safe",
     usage,
   });
+});
+
+test("omits the SDK request-options argument when no signal is present", async () => {
+  const { client, state } = createClient();
+
+  await client.generate(generateRequest);
+  await withSnapshotFixture(async ({ first }) => {
+    await client.edit({
+      prompt: "edit one image",
+      quality: "auto",
+      size: "1024x1024",
+      output_format: "png",
+      images: Object.freeze([first]),
+    });
+  });
+
+  assert.deepEqual(state.generateArgumentCounts, [1]);
+  assert.deepEqual(state.editArgumentCounts, [1]);
+  assert.deepEqual(state.generateSignals, [undefined]);
+  assert.deepEqual(state.editSignals, [undefined]);
+});
+
+test("passes the caller AbortSignal to generate and edit SDK requests", async () => {
+  const controller = new AbortController();
+  const { client, state } = createClient();
+
+  await client.generate(generateRequest, controller.signal);
+  await withSnapshotFixture(async ({ first }) => {
+    await client.edit(
+      {
+        prompt: "edit one image",
+        quality: "auto",
+        size: "1024x1024",
+        output_format: "png",
+        images: Object.freeze([first]),
+      },
+      controller.signal,
+    );
+  });
+
+  assert.equal(state.generateSignals[0], controller.signal);
+  assert.equal(state.editSignals[0], controller.signal);
+  assert.deepEqual(state.generateArgumentCounts, [2]);
+  assert.deepEqual(state.editArgumentCounts, [2]);
+});
+
+test("default SDK adapter preserves underlying method arity with and without a signal", async () => {
+  interface PatchedImagesPrototype {
+    generate(
+      ...args: [
+        body: OpenAIImageGenerateBody,
+        options?: OpenAIImageRequestOptions,
+      ]
+    ): OpenAIImageAPIPromise;
+    edit(
+      ...args: [body: OpenAIImageEditBody, options?: OpenAIImageRequestOptions]
+    ): OpenAIImageAPIPromise;
+  }
+
+  const prototype = Images.prototype as unknown as PatchedImagesPrototype;
+  const originalGenerate = prototype.generate;
+  const originalEdit = prototype.edit;
+  const generateArgumentCounts: number[] = [];
+  const editArgumentCounts: number[] = [];
+  const generateSignals: (AbortSignal | undefined)[] = [];
+  const editSignals: (AbortSignal | undefined)[] = [];
+  const success = () =>
+    apiSuccess({ created: 1, data: [{ b64_json: "aW1hZ2U=" }] });
+
+  prototype.generate = (...args) => {
+    generateArgumentCounts.push(args.length);
+    generateSignals.push(args[1]?.signal);
+    return success();
+  };
+  prototype.edit = (...args) => {
+    editArgumentCounts.push(args.length);
+    editSignals.push(args[1]?.signal);
+    return success();
+  };
+
+  try {
+    const client = new OpenAIImageClient({
+      apiKey: "test-key-default-adapter",
+      baseURL: "https://provider.example.test/v1",
+    });
+    const controller = new AbortController();
+
+    await client.generate(generateRequest);
+    await client.generate(generateRequest, controller.signal);
+    await withSnapshotFixture(async ({ first }) => {
+      const request: ProviderEditRequest = {
+        prompt: "exercise the default adapter",
+        quality: "auto",
+        size: "1024x1024",
+        output_format: "png",
+        images: Object.freeze([first]),
+      };
+      await client.edit(request);
+      await client.edit(request, controller.signal);
+    });
+
+    assert.deepEqual(generateArgumentCounts, [1, 2]);
+    assert.deepEqual(editArgumentCounts, [1, 2]);
+    assert.deepEqual(generateSignals, [undefined, controller.signal]);
+    assert.deepEqual(editSignals, [undefined, controller.signal]);
+  } finally {
+    prototype.generate = originalGenerate;
+    prototype.edit = originalEdit;
+  }
 });
 
 test("copies only known numeric usage fields from an untrusted provider response", async () => {

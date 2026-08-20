@@ -49,6 +49,12 @@ export interface ProviderImage {
 }
 
 export interface ImageProvider {
-  generate(request: ProviderGenerateRequest): Promise<ProviderImage>;
-  edit(request: ProviderEditRequest): Promise<ProviderImage>;
+  generate(
+    request: ProviderGenerateRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderImage>;
+  edit(
+    request: ProviderEditRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderImage>;
 }

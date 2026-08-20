@@ -1,6 +1,6 @@
 {
   "name": "claude-openai-gpt-image",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "engines": { "node": ">=20" },
@@ -9,6 +9,7 @@
     "test": "tsx --test test/**/*.test.ts",
     "build": "node scripts/build.mjs",
     "test:dist": "tsx --test test/dist/**/*.test.ts",
+    "test:host": "tsx --test test/host/**/*.smoke.ts",
     "validate": "node scripts/validate-package.mjs"
   },
   "dependencies": {

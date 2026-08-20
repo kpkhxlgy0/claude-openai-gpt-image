@@ -9,7 +9,7 @@
       "name": "gpt-image-2",
       "source": "./",
       "description": "Generate and edit project images with OpenAI GPT Image 2 through a bundled local MCP server.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "KPK"
       },

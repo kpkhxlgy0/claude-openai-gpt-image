@@ -35,6 +35,7 @@ import { generateImage } from "../src/tools/generate-image.ts";
 import { toMcpError, toMcpSuccess } from "../src/tools/result.ts";
 import { getStatus } from "../src/tools/status.ts";
 import type {
+  ImageToolOutput,
   ToolContext,
   ToolOperations,
 } from "../src/tools/types.ts";
@@ -77,6 +78,8 @@ function hasCode(code: string): (error: unknown) => boolean {
 class FakeProvider implements ImageProvider {
   readonly generateRequests: ProviderGenerateRequest[] = [];
   readonly editRequests: ProviderEditRequest[] = [];
+  readonly generateSignals: (AbortSignal | undefined)[] = [];
+  readonly editSignals: (AbortSignal | undefined)[] = [];
 
   constructor(
     private readonly generateResult: (
@@ -91,13 +94,21 @@ class FakeProvider implements ImageProvider {
     }),
   ) {}
 
-  async generate(request: ProviderGenerateRequest): Promise<ProviderImage> {
+  async generate(
+    request: ProviderGenerateRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderImage> {
     this.generateRequests.push(request);
+    this.generateSignals.push(signal);
     return this.generateResult(request);
   }
 
-  async edit(request: ProviderEditRequest): Promise<ProviderImage> {
+  async edit(
+    request: ProviderEditRequest,
+    signal?: AbortSignal,
+  ): Promise<ProviderImage> {
     this.editRequests.push(request);
+    this.editSignals.push(signal);
     return this.editResult(request);
   }
 }
@@ -188,6 +199,12 @@ function makeOperations(
     publishOutput: publisher,
     makeDefaultOutputPath: () =>
       ".claude/generated-images/gpt-image-2/default.png",
+    deferCleanup(task) {
+      const timer = setTimeout(() => {
+        void task().catch(() => undefined);
+      }, 1_000);
+      timer.unref();
+    },
     ...overrides,
   };
 }
@@ -546,6 +563,47 @@ test("edit snapshots inputs plus mask in order and validates the mask before pro
   });
 });
 
+test("generate and edit forward the caller signal into output publication", async () => {
+  await withWorkspace(async ({ root, roots, paths }) => {
+    await mkdir(path.join(root, "inputs"), { recursive: true });
+    await writeFile(path.join(root, "inputs", "first.png"), "first");
+    const controller = new AbortController();
+    const provider = new FakeProvider();
+    const { publisher, state } = createPublisher();
+    const { snapshotter } = createSnapshotter(() => PNG_INFO);
+    const operations = makeOperations(paths, {
+      snapshotInputs: snapshotter,
+      publishOutput: publisher,
+    });
+    const context = makeContext(roots, provider, operations);
+
+    await generateImage(generateInput, context, controller.signal);
+    const { mask_path: _maskPath, ...withoutMask } = editInput;
+    await editImage(
+      {
+        ...withoutMask,
+        image_paths: ["inputs/first.png"],
+      },
+      context,
+      controller.signal,
+    );
+
+    assert.equal(state.calls.length, 2);
+    assert.equal(
+      (state.calls[0] as Parameters<OutputPublisher>[0] & {
+        signal?: AbortSignal;
+      }).signal,
+      controller.signal,
+    );
+    assert.equal(
+      (state.calls[1] as Parameters<OutputPublisher>[0] & {
+        signal?: AbortSignal;
+      }).signal,
+      controller.signal,
+    );
+  });
+});
+
 test("edit rejects non-PNG, opaque, and dimension-mismatched masks before provider invocation", async () => {
   const invalidMasks: readonly [string, Readonly<ImageInfo>][] = [
     ["non-PNG", JPEG_INFO],
@@ -670,6 +728,248 @@ test("edit disposes snapshots after provider success and provider failure", asyn
   }
 });
 
+test("edit preserves provider and publication failures when snapshot cleanup is deferred", async () => {
+  for (const stage of ["provider", "publication"] as const) {
+    await withWorkspace(async ({ root, roots, paths }) => {
+      await mkdir(path.join(root, "inputs"), { recursive: true });
+      await writeFile(path.join(root, "inputs", "first.png"), "first");
+      let disposalAttempts = 0;
+      const deferredCleanupTasks: (() => Promise<void>)[] = [];
+      const snapshotter: InputSnapshotter = async (resolvedPaths) => ({
+        snapshots: resolvedPaths.map((entry) => ({
+          originalRelativePath: entry.relativePath,
+          snapshotPath: path.join(tmpdir(), "failed-cleanup.snapshot"),
+          filename: path.basename(entry.relativePath),
+          info: PNG_INFO,
+          sizeBytes: 128,
+        })),
+        async dispose() {
+          disposalAttempts += 1;
+          if (disposalAttempts === 1) {
+            throw new Error("private snapshot cleanup failure");
+          }
+        },
+      });
+      const provider = new FakeProvider(
+        undefined,
+        stage === "provider"
+          ? async () => {
+              throw new AppError(
+                "PROVIDER_FAILURE",
+                "simulated provider failure",
+              );
+            }
+          : async () => ({ base64: SMALL_PREVIEW_BASE64 }),
+      );
+      const { publisher } = createPublisher();
+      const failingPublisher: OutputPublisher =
+        stage === "publication"
+          ? async () => {
+              throw new AppError(
+                "INTERNAL_ERROR",
+                "simulated publication failure",
+              );
+            }
+          : publisher;
+      const { mask_path: _maskPath, ...withoutMask } = editInput;
+      const context = makeContext(
+        roots,
+        provider,
+        makeOperations(paths, {
+          snapshotInputs: snapshotter,
+          publishOutput: failingPublisher,
+          deferCleanup(task) {
+            deferredCleanupTasks.push(task);
+          },
+        }),
+      );
+
+      await assert.rejects(
+        () =>
+          editImage(
+            {
+              ...withoutMask,
+              image_paths: ["inputs/first.png"],
+            },
+            context,
+          ),
+        hasCode(stage === "provider" ? "PROVIDER_FAILURE" : "INTERNAL_ERROR"),
+        stage,
+      );
+      assert.equal(disposalAttempts, 1, stage);
+      assert.equal(deferredCleanupTasks.length, 1, stage);
+
+      await deferredCleanupTasks[0]!();
+      assert.equal(disposalAttempts, 2, stage);
+    });
+  }
+});
+
+test("snapshot cleanup failure after publication returns success with a cleanup warning", async () => {
+  await withWorkspace(async ({ root, roots, paths }) => {
+    await mkdir(path.join(root, "inputs"), { recursive: true });
+    await writeFile(path.join(root, "inputs", "first.png"), "first");
+    let disposalAttempts = 0;
+    const deferredCleanupTasks: (() => Promise<void>)[] = [];
+    const snapshotter: InputSnapshotter = async (resolvedPaths) => ({
+      snapshots: resolvedPaths.map((entry) => ({
+        originalRelativePath: entry.relativePath,
+        snapshotPath: path.join(tmpdir(), "cleanup-warning.snapshot"),
+        filename: path.basename(entry.relativePath),
+        info: PNG_INFO,
+        sizeBytes: 128,
+      })),
+      async dispose() {
+        disposalAttempts += 1;
+        if (disposalAttempts === 1) {
+          throw new Error("private snapshot cleanup path");
+        }
+      },
+    });
+    const provider = new FakeProvider();
+    const { mask_path: _maskPath, ...withoutMask } = editInput;
+
+    const result = await editImage(
+      {
+        ...withoutMask,
+        image_paths: ["inputs/first.png"],
+      },
+      makeContext(
+        roots,
+        provider,
+        makeOperations(paths, {
+          snapshotInputs: snapshotter,
+          deferCleanup(task) {
+            deferredCleanupTasks.push(task);
+          },
+        }),
+      ),
+    );
+
+    assert.deepEqual(result.warnings, ["SNAPSHOT_CLEANUP_PENDING"]);
+    assert.equal(provider.editRequests.length, 1);
+    assert.equal(disposalAttempts, 1);
+    assert.equal(deferredCleanupTasks.length, 1);
+    await deferredCleanupTasks[0]!();
+    assert.equal(disposalAttempts, 2);
+  });
+});
+
+test("an aborted queued edit never creates snapshots or invokes the provider", async () => {
+  await withWorkspace(async ({ root, roots, paths }) => {
+    await mkdir(path.join(root, "inputs"), { recursive: true });
+    await writeFile(path.join(root, "inputs", "first.png"), "first");
+    const { snapshotter, state: snapshots } = createSnapshotter(() => PNG_INFO);
+    const provider = new FakeProvider();
+    const gate = new Semaphore(1);
+    let releaseBlocker!: () => void;
+    const blockerWait = new Promise<void>((resolve) => {
+      releaseBlocker = resolve;
+    });
+    const blocker = gate.runExclusive(() => blockerWait);
+    const controller = new AbortController();
+    const context = makeContext(
+      roots,
+      provider,
+      makeOperations(paths, { snapshotInputs: snapshotter }),
+      configuredRuntime(),
+      gate,
+    );
+    const { mask_path: _maskPath, ...withoutMask } = editInput;
+    const queuedOutcome = editImage(
+      {
+        ...withoutMask,
+        image_paths: ["inputs/first.png"],
+        output_path: "outputs/queued.png",
+      },
+      context,
+      controller.signal,
+    ).then(
+      (value) => value,
+      (error: unknown) => error,
+    );
+
+    const snapshotDeadline = Date.now() + 250;
+    while (snapshots.calls.length === 0 && Date.now() < snapshotDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const snapshotCallsBeforeAbort = snapshots.calls.length;
+    controller.abort();
+    releaseBlocker();
+    await blocker;
+    const outcome = await queuedOutcome;
+
+    assert.equal(snapshotCallsBeforeAbort, 0);
+    assert.equal(snapshots.calls.length, 0);
+    assert.equal(provider.editRequests.length, 0);
+    assert.ok(outcome instanceof DOMException);
+    assert.equal(outcome.name, "AbortError");
+  });
+});
+
+test("an admitted edit passes cancellation into snapshot creation", async () => {
+  await withWorkspace(async ({ root, roots, paths }) => {
+    await mkdir(path.join(root, "inputs"), { recursive: true });
+    await writeFile(path.join(root, "inputs", "first.png"), "first");
+    const provider = new FakeProvider();
+    const controller = new AbortController();
+    let observedSignal: AbortSignal | undefined;
+    let markSnapshotStarted!: () => void;
+    const snapshotStarted = new Promise<void>((resolve) => {
+      markSnapshotStarted = resolve;
+    });
+    const snapshotter: InputSnapshotter = async (
+      _resolvedPaths,
+      _pluginDataRoot,
+      signal?: AbortSignal,
+    ) => {
+      observedSignal = signal;
+      markSnapshotStarted();
+      return new Promise((_resolve, reject) => {
+        if (signal === undefined) {
+          reject(new Error("snapshot cancellation signal was not provided"));
+          return;
+        }
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        signal.addEventListener("abort", () => reject(signal.reason), {
+          once: true,
+        });
+      });
+    };
+    const context = makeContext(
+      roots,
+      provider,
+      makeOperations(paths, { snapshotInputs: snapshotter }),
+    );
+    const { mask_path: _maskPath, ...withoutMask } = editInput;
+    const editOutcome = editImage(
+      {
+        ...withoutMask,
+        image_paths: ["inputs/first.png"],
+        output_path: "outputs/cancelled-snapshot.png",
+      },
+      context,
+      controller.signal,
+    ).then(
+      (value) => value,
+      (error: unknown) => error,
+    );
+
+    await snapshotStarted;
+    controller.abort();
+    const outcome = await editOutcome;
+
+    assert.equal(observedSignal, controller.signal);
+    assert.equal(observedSignal.aborted, true);
+    assert.ok(outcome instanceof DOMException);
+    assert.equal(outcome.name, "AbortError");
+    assert.equal(provider.editRequests.length, 0);
+  });
+});
+
 test("the semaphore is FIFO, allows one paid call at a time, and releases after failure", async () => {
   const gate = new Semaphore(1);
   const starts: number[] = [];
@@ -711,6 +1011,75 @@ test("the semaphore is FIFO, allows one paid call at a time, and releases after 
   assert.equal(maximumActive, 1);
 });
 
+test("the semaphore removes an aborted queued waiter without disturbing FIFO order", async () => {
+  const gate = new Semaphore(1);
+  const starts: number[] = [];
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const controller = new AbortController();
+
+  const first = gate.runExclusive(async () => {
+    starts.push(1);
+    await firstBlocked;
+  });
+  const cancelled = gate.runExclusive(() => {
+    starts.push(2);
+  }, controller.signal);
+  const third = gate.runExclusive(() => {
+    starts.push(3);
+  });
+  const cancelledAssertion = assert.rejects(
+    cancelled,
+    (error: unknown) =>
+      error instanceof DOMException && error.name === "AbortError",
+  );
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(starts, [1]);
+  controller.abort();
+  releaseFirst();
+  await first;
+  await cancelledAssertion;
+  await third;
+
+  assert.deepEqual(starts, [1, 3]);
+});
+
+test("the semaphore rejects beyond its pending bound before running an operation", async () => {
+  const gate = new Semaphore(1, 1);
+  let releaseFirst!: () => void;
+  const firstBlocked = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  let overflowRan = false;
+
+  const first = gate.runExclusive(() => firstBlocked);
+  const second = gate.runExclusive(() => undefined);
+  const overflow = gate.runExclusive(() => {
+    overflowRan = true;
+  });
+
+  try {
+    const outcome = await Promise.race([
+      overflow.then(
+        () => "resolved" as const,
+        (error: unknown) => error,
+      ),
+      new Promise<"pending">((resolve) =>
+        setTimeout(() => resolve("pending"), 25),
+      ),
+    ]);
+    assert.ok(outcome instanceof AppError);
+    assert.equal(outcome.code, "RATE_LIMITED");
+    assert.equal(overflowRan, false);
+  } finally {
+    releaseFirst();
+    await Promise.allSettled([first, second, overflow]);
+  }
+});
+
 test("concurrent generate calls share the paid-call gate and never overlap provider calls", async () => {
   await withWorkspace(async ({ roots, paths }) => {
     let active = 0;
@@ -750,6 +1119,77 @@ test("concurrent generate calls share the paid-call gate and never overlap provi
 
     assert.deepEqual([...starts].sort(), ["first", "second", "third"]);
     assert.equal(maximumActive, 1);
+  });
+});
+
+test("concurrent generate calls for one output invoke the provider at most once", async () => {
+  await withWorkspace(async ({ roots, paths }) => {
+    const provider = new FakeProvider();
+    const publicationGate = new Semaphore(1);
+    let publicationCalls = 0;
+    let markFirstPublicationStarted!: () => void;
+    const firstPublicationStarted = new Promise<void>((resolve) => {
+      markFirstPublicationStarted = resolve;
+    });
+    let releaseFirstPublication!: () => void;
+    const firstPublicationBlocked = new Promise<void>((resolve) => {
+      releaseFirstPublication = resolve;
+    });
+    const publisher: OutputPublisher = (input) =>
+      publicationGate.runExclusive(async () => {
+        publicationCalls += 1;
+        if (publicationCalls === 1) {
+          markFirstPublicationStarted();
+          await firstPublicationBlocked;
+        }
+        await mkdir(path.dirname(input.output.absolutePath), { recursive: true });
+        try {
+          await writeFile(input.output.absolutePath, "published", { flag: "wx" });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+            throw new AppError("OUTPUT_EXISTS", "Output path already exists");
+          }
+          throw error;
+        }
+        return {
+          relativePath: input.output.relativePath,
+          absolutePath: input.output.absolutePath,
+          filename: path.basename(input.output.absolutePath),
+          info: { ...PNG_INFO },
+          sizeBytes: Buffer.from(input.base64, "base64").byteLength,
+          warnings: [],
+        };
+      });
+    const context = makeContext(
+      roots,
+      provider,
+      makeOperations(paths, { publishOutput: publisher }),
+    );
+
+    const first = generateImage(generateInput, context);
+    await firstPublicationStarted;
+    const secondOutcome = generateImage(generateInput, context).then(
+      (value) => value,
+      (error: unknown) => error,
+    );
+    const providerDeadline = Date.now() + 250;
+    while (
+      provider.generateRequests.length < 2 &&
+      Date.now() < providerDeadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const providerCallsBeforePublication = provider.generateRequests.length;
+
+    releaseFirstPublication();
+    await first;
+    const second = await secondOutcome;
+
+    assert.ok(second instanceof AppError);
+    assert.equal(second.code, "OUTPUT_EXISTS");
+    assert.equal(providerCallsBeforePublication, 1);
+    assert.equal(provider.generateRequests.length, 1);
+    assert.equal(publicationCalls, 1);
   });
 });
 
@@ -819,6 +1259,51 @@ test("toMcpSuccess includes previews only at or below 2 MiB and never puts Base6
       false,
     );
   });
+});
+
+test("toMcpSuccess renders path text as escaped untrusted data", () => {
+  const markdownTarget = ["https:", "", "example.invalid", ""].join("/");
+  const relativePath = [
+    "outputs/line",
+    String.fromCodePoint(0x0a, 0x85, 0x2028, 0x2029, 0x202e),
+    `[click](${markdownTarget})\`name\`.png`,
+  ].join("");
+  const output: ImageToolOutput = {
+    model: "gpt-image-2",
+    workspace_root: "C:/workspace",
+    relative_path: relativePath,
+    absolute_path: `C:/workspace/${relativePath}`,
+    requested_size: "1024x1024",
+    actual_width: 1024,
+    actual_height: 1024,
+    format: "png",
+    mime_type: "image/png",
+    size_bytes: 1,
+    quality: "auto",
+    preview_included: false,
+    warnings: ["SNAPSHOT_CLEANUP_PENDING"],
+  };
+
+  const result = toMcpSuccess(output);
+  const textContent = result.content[0];
+  assert.equal(textContent?.type, "text");
+  if (textContent?.type !== "text") {
+    return;
+  }
+
+  assert.equal(
+    /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u2028\u2029\u202a-\u202e\u2066-\u2069]/u.test(
+      textContent.text,
+    ),
+    false,
+  );
+  assert.ok(
+    textContent.text.includes(
+      `\`\` outputs/line\\u000a\\u0085\\u2028\\u2029\\u202e[click](${markdownTarget})\`name\`.png \`\``,
+    ),
+  );
+  assert.equal(result.structuredContent?.relative_path, relativePath);
+  assert.equal(result.structuredContent?.absolute_path, output.absolute_path);
 });
 
 test("toMcpSuccess maps status without adding secret-bearing fields", async () => {

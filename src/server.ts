@@ -99,7 +99,13 @@ const imageSuccessOutputSchema = z.strictObject({
     .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/)
     .optional(),
   usage: usageSchema.optional(),
-  warnings: z.array(z.enum(["TEMP_CLEANUP_PENDING", "SIZE_MISMATCH"])),
+  warnings: z.array(
+    z.enum([
+      "TEMP_CLEANUP_PENDING",
+      "SIZE_MISMATCH",
+      "SNAPSHOT_CLEANUP_PENDING",
+    ]),
+  ),
 });
 
 const STATUS_ANNOTATIONS = {
@@ -295,22 +301,28 @@ export function createImageServer(
     }
   };
 
-  const runGenerate = async (input: unknown) => {
+  const runGenerate = async (input: unknown, signal?: AbortSignal) => {
     try {
+      signal?.throwIfAborted();
       const parsed = parseToolInput(generateImageSchema, input);
       await waitForRootSynchronization();
-      return toMcpSuccess(await generateImage(parsed, context));
+      signal?.throwIfAborted();
+      return toMcpSuccess(await generateImage(parsed, context, signal));
     } catch (error) {
+      signal?.throwIfAborted();
       return toolFailure(error);
     }
   };
 
-  const runEdit = async (input: unknown) => {
+  const runEdit = async (input: unknown, signal?: AbortSignal) => {
     try {
+      signal?.throwIfAborted();
       const parsed = parseToolInput(editImageSchema, input);
       await waitForRootSynchronization();
-      return toMcpSuccess(await editImage(parsed, context));
+      signal?.throwIfAborted();
+      return toMcpSuccess(await editImage(parsed, context, signal));
     } catch (error) {
+      signal?.throwIfAborted();
       return toolFailure(error);
     }
   };
@@ -336,7 +348,7 @@ export function createImageServer(
       outputSchema: imageSuccessOutputSchema,
       annotations: IMAGE_ANNOTATIONS,
     },
-    (input) => runGenerate(input),
+    (input, extra) => runGenerate(input, extra.signal),
   );
 
   server.registerTool(
@@ -348,7 +360,7 @@ export function createImageServer(
       outputSchema: imageSuccessOutputSchema,
       annotations: IMAGE_ANNOTATIONS,
     },
-    (input) => runEdit(input),
+    (input, extra) => runEdit(input, extra.signal),
   );
 
   const advertisedTools: readonly Tool[] = [
@@ -387,14 +399,15 @@ export function createImageServer(
   }));
   const rawCallToolHandler = (
     request: z.output<typeof rawCallToolRequestSchema>,
+    extra: { readonly signal: AbortSignal },
   ) => {
     switch (request.params.name) {
       case "get_status":
         return runStatus(request.params.arguments);
       case "generate_image":
-        return runGenerate(request.params.arguments);
+        return runGenerate(request.params.arguments, extra.signal);
       case "edit_image":
-        return runEdit(request.params.arguments);
+        return runEdit(request.params.arguments, extra.signal);
       default:
         return toolFailure(
           new AppError("INVALID_INPUT", "Requested image tool is not available"),

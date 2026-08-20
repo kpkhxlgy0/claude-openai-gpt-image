@@ -4,6 +4,12 @@ description: Check GPT Image 2 plugin configuration without making a paid image 
 
 Invoke only `get_status`, exactly once. Do not invoke any image-generation or image-editing tool as part of setup or diagnosis.
 
+If `get_status` is unavailable, cannot be invoked, or does not return a real current-session MCP tool result, stop. Report that setup could not inspect the plugin; do not infer status from files, prior messages, or other tools.
+
+If the result reports an error or omits any required field, stop. Require the returned fields below to have their documented types before reporting status or giving configuration advice.
+
+Do not use Bash, Write, Agent, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC as a fallback.
+
 Report these returned fields without guessing or revealing configuration values:
 
 - `api_key_configured`

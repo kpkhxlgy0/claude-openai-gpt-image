@@ -1,6 +1,6 @@
 import { AppError } from "../errors.ts";
 
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+export const DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 
 function hasControlCharacters(value: string): boolean {
   for (let index = 0; index < value.length; index += 1) {
@@ -14,7 +14,7 @@ function hasControlCharacters(value: string): boolean {
 
 export function validateOpenAIBaseUrl(value?: string): string {
   if (value === undefined || value === "") {
-    return DEFAULT_BASE_URL;
+    return DEFAULT_OPENAI_BASE_URL;
   }
 
   if (typeof value !== "string") {

@@ -23098,7 +23098,7 @@ function toErrorResult(error51) {
 }
 
 // src/config/base-url.ts
-var DEFAULT_BASE_URL = "https://api.openai.com/v1";
+var DEFAULT_OPENAI_BASE_URL = "https://api.openai.com/v1";
 function hasControlCharacters(value) {
   for (let index = 0; index < value.length; index += 1) {
     const code = value.charCodeAt(index);
@@ -23110,7 +23110,7 @@ function hasControlCharacters(value) {
 }
 function validateOpenAIBaseUrl(value) {
   if (value === void 0 || value === "") {
-    return DEFAULT_BASE_URL;
+    return DEFAULT_OPENAI_BASE_URL;
   }
   if (typeof value !== "string") {
     throw new AppError("CONFIG_INVALID", "Base URL must be a string");
@@ -23177,10 +23177,11 @@ function loadEnvironment(env) {
   const rawKey = env.OPENAI_API_KEY;
   const apiKeyConfigured = typeof rawKey === "string" && rawKey.trim() !== "";
   const rawBaseUrl = env.OPENAI_BASE_URL;
-  const baseUrlConfigured = typeof rawBaseUrl === "string" && rawBaseUrl.trim() !== "";
+  const baseUrlProvided = typeof rawBaseUrl === "string" && rawBaseUrl !== "";
   const baseUrl = validateOpenAIBaseUrl(
-    baseUrlConfigured ? rawBaseUrl : void 0
+    baseUrlProvided ? rawBaseUrl : void 0
   );
+  const baseUrlConfigured = baseUrlProvided && baseUrl !== DEFAULT_OPENAI_BASE_URL;
   const config2 = {
     apiKeyConfigured,
     baseUrl,
@@ -23200,81 +23201,100 @@ function loadEnvironment(env) {
   return config2;
 }
 
-// src/concurrency.ts
-var Semaphore = class {
-  #available;
-  #queueHead;
-  #queueTail;
-  constructor(capacity = 1) {
-    if (!Number.isSafeInteger(capacity) || capacity < 1) {
-      throw new RangeError("Semaphore capacity must be a positive integer");
-    }
-    this.#available = capacity;
-  }
-  async runExclusive(operation) {
-    const release = await this.#acquire();
-    try {
-      return await operation();
-    } finally {
-      release();
-    }
-  }
-  #acquire() {
-    if (this.#available > 0) {
-      this.#available -= 1;
-      return Promise.resolve(this.#makeRelease());
-    }
-    return new Promise((resolve) => {
-      const waiter = { resolve, next: void 0 };
-      if (this.#queueTail === void 0) {
-        this.#queueHead = waiter;
-      } else {
-        this.#queueTail.next = waiter;
-      }
-      this.#queueTail = waiter;
-    });
-  }
-  #makeRelease() {
-    let released = false;
-    return () => {
-      if (released) {
-        return;
-      }
-      released = true;
-      const next = this.#queueHead;
-      if (next !== void 0) {
-        this.#queueHead = next.next;
-        if (this.#queueHead === void 0) {
-          this.#queueTail = void 0;
-        }
-        next.next = void 0;
-        next.resolve(this.#makeRelease());
-        return;
-      }
-      this.#available += 1;
-    };
-  }
-};
-var processPaidCallGate = new Semaphore(1);
-
 // src/files/workspace-roots.ts
 import { realpath, stat } from "node:fs/promises";
 import path from "node:path";
 function isWindows() {
   return process.platform === "win32";
 }
-function normalizeKey(value) {
-  const resolved = path.resolve(value);
-  return isWindows() ? resolved.toLowerCase() : resolved;
+function createCanonicalPathOps(pathDialect) {
+  const normalize = (value) => pathDialect.resolve(value);
+  return {
+    normalize,
+    isSame(a, b) {
+      return normalize(a) === normalize(b);
+    },
+    contains(rootCanonical, candidateCanonical) {
+      const root = normalize(rootCanonical);
+      const candidate = normalize(candidateCanonical);
+      if (root === candidate) {
+        return true;
+      }
+      const rootWithSeparator = root.endsWith(pathDialect.sep) ? root : root + pathDialect.sep;
+      return candidate.startsWith(rootWithSeparator);
+    }
+  };
 }
+var HOST_PATH_OPERATIONS = createCanonicalPathOps(path);
+var HOST_SELECTION_POLICY = {
+  pathOperations: HOST_PATH_OPERATIONS,
+  caseInsensitiveFallback: isWindows()
+};
 function isSamePath(a, b) {
-  return normalizeKey(a) === normalizeKey(b);
+  return HOST_PATH_OPERATIONS.isSame(a, b);
+}
+function isPathInsideRoot(rootCanonical, candidateCanonical) {
+  return HOST_PATH_OPERATIONS.contains(rootCanonical, candidateCanonical);
+}
+function deduplicateCanonicalRoots(roots, pathOperations = HOST_PATH_OPERATIONS) {
+  const seen = /* @__PURE__ */ new Set();
+  const unique = [];
+  for (const root of roots) {
+    const key = pathOperations.normalize(root.canonicalPath);
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    unique.push(root);
+  }
+  return unique;
+}
+function requireUniqueMatch(matches) {
+  if (matches.length === 1) {
+    return matches[0];
+  }
+  if (matches.length > 1) {
+    throw new AppError(
+      "WORKSPACE_ROOT_REQUIRED",
+      "Workspace root selector matches multiple approved roots"
+    );
+  }
+  return void 0;
+}
+function selectApprovedWorkspaceRoot(roots, requested, policy = HOST_SELECTION_POLICY) {
+  const { pathOperations } = policy;
+  const exactCanonical = requireUniqueMatch(
+    roots.filter((root) => pathOperations.isSame(root.canonicalPath, requested))
+  );
+  if (exactCanonical) {
+    return exactCanonical;
+  }
+  const exactDisplay = requireUniqueMatch(
+    roots.filter((root) => pathOperations.isSame(root.displayPath, requested))
+  );
+  if (exactDisplay) {
+    return exactDisplay;
+  }
+  if (policy.caseInsensitiveFallback) {
+    const requestedKey = pathOperations.normalize(requested).toLowerCase();
+    const folded = requireUniqueMatch(
+      roots.filter(
+        (root) => pathOperations.normalize(root.canonicalPath).toLowerCase() === requestedKey || pathOperations.normalize(root.displayPath).toLowerCase() === requestedKey
+      )
+    );
+    if (folded) {
+      return folded;
+    }
+  }
+  throw new AppError(
+    "PATH_OUTSIDE_WORKSPACE",
+    "Requested workspace root is not an approved root"
+  );
 }
 var WorkspaceRootRegistry = class {
   #roots = [];
   async replace(paths) {
     const next = [];
-    const seen = /* @__PURE__ */ new Set();
     for (const raw of paths) {
       if (typeof raw !== "string" || raw.trim() === "") {
         throw new AppError("INVALID_INPUT", "Workspace root must be a non-empty path");
@@ -23303,17 +23323,12 @@ var WorkspaceRootRegistry = class {
           "Workspace root must be an existing local directory"
         );
       }
-      const key = normalizeKey(canonicalPath);
-      if (seen.has(key)) {
-        continue;
-      }
-      seen.add(key);
       next.push({
         displayPath: raw,
         canonicalPath
       });
     }
-    this.#roots = next;
+    this.#roots = deduplicateCanonicalRoots(next);
   }
   list() {
     return this.#roots.slice();
@@ -23334,16 +23349,7 @@ var WorkspaceRootRegistry = class {
         "Multiple workspace roots require an explicit approved selector"
       );
     }
-    const match = this.#roots.find(
-      (root) => isSamePath(root.canonicalPath, requested) || isSamePath(root.displayPath, requested)
-    );
-    if (!match) {
-      throw new AppError(
-        "PATH_OUTSIDE_WORKSPACE",
-        "Requested workspace root is not an approved root"
-      );
-    }
-    return match;
+    return selectApprovedWorkspaceRoot(this.#roots, requested);
   }
   /**
    * Find the unique approved root that contains the given canonical absolute path.
@@ -23359,24 +23365,6 @@ var WorkspaceRootRegistry = class {
     return void 0;
   }
 };
-function isPathInsideRoot(rootCanonical, candidateCanonical) {
-  const root = path.resolve(rootCanonical);
-  const candidate = path.resolve(candidateCanonical);
-  if (isSamePath(root, candidate)) {
-    return true;
-  }
-  const relative = path.relative(root, candidate);
-  if (relative === "") {
-    return true;
-  }
-  if (relative.startsWith("..") || path.isAbsolute(relative)) {
-    return false;
-  }
-  const rootWithSep = root.endsWith(path.sep) ? root : root + path.sep;
-  const candidateKey = isWindows() ? candidate.toLowerCase() : candidate;
-  const rootKey = isWindows() ? rootWithSep.toLowerCase() : rootWithSep;
-  return candidateKey.startsWith(rootKey) || isSamePath(root, candidate);
-}
 
 // src/openai/map-error.ts
 var MAX_SAFE_REQUEST_ID_LENGTH = 128;
@@ -34481,6 +34469,7 @@ import {
   stat as stat2
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { setTimeout as scheduleTimeout } from "node:timers";
 import path3 from "node:path";
 
 // src/images/types.ts
@@ -36695,11 +36684,13 @@ function snapshotStorageFailure(message, cause) {
 async function closeAll(inputs) {
   await Promise.allSettled(inputs.map(({ handle }) => handle.close()));
 }
-async function assertOpenedInputContained(resolved, handleStats) {
+async function assertOpenedInputContained(resolved, handleStats, signal) {
+  signal?.throwIfAborted();
   let canonicalPath;
   let pathStats;
   try {
     canonicalPath = await realpath2(resolved.absolutePath);
+    signal?.throwIfAborted();
     if (!isPathInsideRoot(resolved.root.canonicalPath, canonicalPath)) {
       throw new AppError(
         "PATH_OUTSIDE_WORKSPACE",
@@ -36707,7 +36698,9 @@ async function assertOpenedInputContained(resolved, handleStats) {
       );
     }
     pathStats = await stat2(canonicalPath, { bigint: true });
+    signal?.throwIfAborted();
   } catch (error51) {
+    signal?.throwIfAborted();
     if (error51 instanceof AppError) {
       throw error51;
     }
@@ -36724,21 +36717,25 @@ async function assertOpenedInputContained(resolved, handleStats) {
     );
   }
 }
-async function openValidatedInput(resolved) {
+async function openValidatedInput(resolved, signal) {
+  signal?.throwIfAborted();
   let handle;
   try {
     handle = await open(resolved.absolutePath, "r");
   } catch (error51) {
+    signal?.throwIfAborted();
     throw new AppError("INPUT_FILE_INVALID", "Input file could not be opened", {
       cause: error51
     });
   }
   try {
+    signal?.throwIfAborted();
     const stats = await handle.stat({ bigint: true });
+    signal?.throwIfAborted();
     if (!stats.isFile()) {
       invalidInput("Input path must refer to a regular file");
     }
-    await assertOpenedInputContained(resolved, stats);
+    await assertOpenedInputContained(resolved, stats, signal);
     if (stats.size > BigInt(MAX_INPUT_BYTES)) {
       invalidInput("Input file exceeds the 50 MiB limit");
     }
@@ -36751,6 +36748,7 @@ async function openValidatedInput(resolved) {
     };
   } catch (error51) {
     await handle.close().catch(() => void 0);
+    signal?.throwIfAborted();
     if (error51 instanceof AppError) {
       throw error51;
     }
@@ -36761,12 +36759,13 @@ async function openValidatedInput(resolved) {
     );
   }
 }
-async function openAndMeasureInputs(paths) {
+async function openAndMeasureInputs(paths, signal) {
   const opened = [];
   let aggregateBytes = 0;
   try {
     for (const resolved of paths) {
-      const input = await openValidatedInput(resolved);
+      signal?.throwIfAborted();
+      const input = await openValidatedInput(resolved, signal);
       aggregateBytes += input.sizeBytes;
       if (aggregateBytes > MAX_AGGREGATE_INPUT_BYTES) {
         await input.handle.close().catch(() => void 0);
@@ -36774,66 +36773,86 @@ async function openAndMeasureInputs(paths) {
       }
       opened.push(input);
     }
+    signal?.throwIfAborted();
     return opened;
   } catch (error51) {
     await closeAll(opened);
+    signal?.throwIfAborted();
     throw error51;
   }
 }
-async function writeAll(handle, buffer, length, position) {
+async function writeAll(handle, buffer, length, position, signal) {
   let written = 0;
   while (written < length) {
+    signal?.throwIfAborted();
     const result = await handle.write(
       buffer,
       written,
       length - written,
       position + written
     );
+    signal?.throwIfAborted();
     if (result.bytesWritten === 0) {
       invalidInput("Snapshot file could not be written completely");
     }
     written += result.bytesWritten;
   }
 }
-async function copyStableInput(input, snapshotPath) {
+async function copyStableInput(input, snapshotPath, operations, signal) {
+  signal?.throwIfAborted();
   let destination;
   try {
     destination = await open(snapshotPath, "wx", 384);
   } catch (error51) {
+    signal?.throwIfAborted();
     throw snapshotStorageFailure(
       "Snapshot file could not be created safely",
       error51
     );
   }
   try {
+    signal?.throwIfAborted();
     const buffer = Buffer.allocUnsafe(
       Math.max(1, Math.min(COPY_BUFFER_BYTES, input.sizeBytes))
     );
     let position = 0;
     while (position < input.sizeBytes) {
+      signal?.throwIfAborted();
       const length = Math.min(buffer.length, input.sizeBytes - position);
-      const { bytesRead } = await input.handle.read(buffer, 0, length, position);
+      const { bytesRead } = await operations.readInput(
+        input.handle,
+        buffer,
+        0,
+        length,
+        position
+      );
+      signal?.throwIfAborted();
       if (bytesRead === 0) {
         invalidInput("Input file changed while it was being copied");
       }
-      await writeAll(destination, buffer, bytesRead, position);
+      await writeAll(destination, buffer, bytesRead, position, signal);
       position += bytesRead;
     }
+    signal?.throwIfAborted();
     const extra = Buffer.allocUnsafe(1);
-    const { bytesRead: extraBytes } = await input.handle.read(
+    const { bytesRead: extraBytes } = await operations.readInput(
+      input.handle,
       extra,
       0,
       1,
       input.sizeBytes
     );
+    signal?.throwIfAborted();
     if (extraBytes !== 0) {
       invalidInput("Input file changed while it was being copied");
     }
     const finalStats = await input.handle.stat({ bigint: true });
+    signal?.throwIfAborted();
     if (finalStats.size !== BigInt(input.sizeBytes) || finalStats.mtimeNs !== input.initialMtimeNs || finalStats.ctimeNs !== input.initialCtimeNs) {
       invalidInput("Input file changed while it was being copied");
     }
   } catch (error51) {
+    signal?.throwIfAborted();
     if (error51 instanceof AppError) {
       throw error51;
     }
@@ -36873,14 +36892,18 @@ function createSnapshotSet(snapshotDirectory, snapshots, operations) {
     dispose
   });
 }
-async function snapshotInputsWithOperations(paths, pluginDataRoot, operations) {
-  const opened = await openAndMeasureInputs(paths);
+async function snapshotInputsWithOperations(paths, pluginDataRoot, operations, signal) {
+  signal?.throwIfAborted();
+  const opened = await openAndMeasureInputs(paths, signal);
   let snapshotDirectory;
   try {
+    signal?.throwIfAborted();
     if (pluginDataRoot !== void 0) {
       try {
         await mkdir(pluginDataRoot, { recursive: true, mode: 448 });
+        signal?.throwIfAborted();
       } catch (error51) {
+        signal?.throwIfAborted();
         throw snapshotStorageFailure(
           "Snapshot storage directory could not be prepared safely",
           error51
@@ -36892,25 +36915,32 @@ async function snapshotInputsWithOperations(paths, pluginDataRoot, operations) {
         path3.join(pluginDataRoot ?? tmpdir(), ".gpt-image-input-")
       );
     } catch (error51) {
+      signal?.throwIfAborted();
       throw snapshotStorageFailure(
         "Snapshot storage directory could not be created safely",
         error51
       );
     }
+    signal?.throwIfAborted();
     const snapshots = [];
     for (const [index, input] of opened.entries()) {
+      signal?.throwIfAborted();
       const snapshotPath = path3.join(snapshotDirectory, `${index}.snapshot`);
-      await copyStableInput(input, snapshotPath);
+      await copyStableInput(input, snapshotPath, operations, signal);
       let bytes;
       try {
+        signal?.throwIfAborted();
         bytes = await readFile2(snapshotPath);
+        signal?.throwIfAborted();
       } catch (error51) {
+        signal?.throwIfAborted();
         throw snapshotStorageFailure(
           "Input snapshot could not be read for validation",
           error51
         );
       }
       const info = Object.freeze({ ...await inspectImage(bytes) });
+      signal?.throwIfAborted();
       snapshots.push(
         Object.freeze({
           originalRelativePath: input.resolved.relativePath,
@@ -36921,32 +36951,43 @@ async function snapshotInputsWithOperations(paths, pluginDataRoot, operations) {
         })
       );
     }
+    signal?.throwIfAborted();
     return createSnapshotSet(snapshotDirectory, snapshots, operations);
   } catch (error51) {
     if (snapshotDirectory !== void 0) {
       try {
         await operations.removeSnapshotDirectory(snapshotDirectory);
-      } catch (cleanupError) {
-        throw snapshotStorageFailure(
-          "Partial input snapshots could not be removed safely",
-          cleanupError
-        );
+      } catch {
+        try {
+          operations.deferCleanup(
+            () => operations.removeSnapshotDirectory(snapshotDirectory)
+          );
+        } catch {
+        }
       }
     }
+    signal?.throwIfAborted();
     throw error51;
   } finally {
     await closeAll(opened);
   }
 }
 var nodeSnapshotOperations = {
-  removeSnapshotDirectory
+  readInput: (handle, buffer, offset, length, position) => handle.read(buffer, offset, length, position),
+  removeSnapshotDirectory,
+  deferCleanup(task) {
+    const timer = scheduleTimeout(() => {
+      void task().catch(() => void 0);
+    }, 1e3);
+    timer.unref();
+  }
 };
 function createInputSnapshotter(overrides = {}) {
   const operations = {
     ...nodeSnapshotOperations,
     ...overrides
   };
-  return (paths, pluginDataRoot) => snapshotInputsWithOperations(paths, pluginDataRoot, operations);
+  return (paths, pluginDataRoot, signal) => snapshotInputsWithOperations(paths, pluginDataRoot, operations, signal);
 }
 var snapshotInputs = createInputSnapshotter();
 
@@ -36965,8 +37006,8 @@ function createDefaultSDKClient(options) {
   const client = new OpenAI(options);
   return {
     images: {
-      generate: (body) => client.images.generate(body),
-      edit: (body) => client.images.edit(body)
+      generate: (body, requestOptions) => requestOptions === void 0 ? client.images.generate(body) : client.images.generate(body, requestOptions),
+      edit: (body, requestOptions) => requestOptions === void 0 ? client.images.edit(body) : client.images.edit(body, requestOptions)
     }
   };
 }
@@ -37010,13 +37051,16 @@ function assertEditSnapshots(request) {
     invalidInput2("Input snapshots exceed the aggregate size limit");
   }
 }
-async function readSnapshotBytes(snapshot) {
+async function readSnapshotBytes(snapshot, signal) {
+  signal?.throwIfAborted();
   let handle;
   try {
     handle = await open2(snapshot.snapshotPath, "r");
+    signal?.throwIfAborted();
     const bytes = Buffer.allocUnsafe(snapshot.sizeBytes);
     let offset = 0;
     while (offset < bytes.length) {
+      signal?.throwIfAborted();
       const result = await handle.read(
         bytes,
         offset,
@@ -37028,13 +37072,18 @@ async function readSnapshotBytes(snapshot) {
       }
       offset += result.bytesRead;
     }
+    signal?.throwIfAborted();
     const extra = Buffer.allocUnsafe(1);
     const extraResult = await handle.read(extra, 0, 1, snapshot.sizeBytes);
+    signal?.throwIfAborted();
     if (offset !== snapshot.sizeBytes || extraResult.bytesRead !== 0) {
       invalidInput2("Input snapshot size changed before upload");
     }
     return bytes;
   } catch (error51) {
+    if (signal?.aborted) {
+      signal.throwIfAborted();
+    }
     if (error51 instanceof AppError) {
       throw error51;
     }
@@ -37046,13 +37095,19 @@ async function readSnapshotBytes(snapshot) {
     await handle?.close().catch(() => void 0);
   }
 }
-async function snapshotToUpload(snapshot) {
-  const bytes = await readSnapshotBytes(snapshot);
+async function snapshotToUpload(snapshot, signal) {
+  const bytes = await readSnapshotBytes(snapshot, signal);
+  signal?.throwIfAborted();
   try {
-    return await toFile(bytes, snapshot.filename, {
+    const upload = await toFile(bytes, snapshot.filename, {
       type: snapshot.info.mimeType
     });
-  } catch {
+    signal?.throwIfAborted();
+    return upload;
+  } catch (error51) {
+    if (signal?.aborted) {
+      signal.throwIfAborted();
+    }
     throw new AppError(
       "INTERNAL_ERROR",
       "Input snapshot could not be prepared for upload"
@@ -37133,6 +37188,10 @@ var OpenAIImageClient = class {
     }
     const options = Object.freeze({
       apiKey: config2.apiKey,
+      adminAPIKey: null,
+      organization: null,
+      project: null,
+      webhookSecret: null,
       baseURL: validateOpenAIBaseUrl(config2.baseURL),
       maxRetries: 0,
       logLevel: "off",
@@ -37142,7 +37201,8 @@ var OpenAIImageClient = class {
     const createSDKClient = dependencies.createSDKClient ?? createDefaultSDKClient;
     this.#sdk = createSDKClient(options);
   }
-  async generate(request) {
+  async generate(request, signal) {
+    signal?.throwIfAborted();
     const body = {
       model: "gpt-image-2",
       n: 1,
@@ -37153,13 +37213,17 @@ var OpenAIImageClient = class {
       moderation: request.moderation
     };
     addCompression(body, request);
-    return this.#invoke(() => this.#sdk.images.generate(body));
+    return this.#invoke(
+      () => signal === void 0 ? this.#sdk.images.generate(body) : this.#sdk.images.generate(body, { signal }),
+      signal
+    );
   }
-  async edit(request) {
+  async edit(request, signal) {
+    signal?.throwIfAborted();
     assertEditSnapshots(request);
     const images = [];
     for (const snapshot of request.images) {
-      images.push(await snapshotToUpload(snapshot));
+      images.push(await snapshotToUpload(snapshot, signal));
     }
     const body = {
       model: "gpt-image-2",
@@ -37172,15 +37236,23 @@ var OpenAIImageClient = class {
     };
     addCompression(body, request);
     if (request.mask !== void 0) {
-      body.mask = await snapshotToUpload(request.mask);
+      body.mask = await snapshotToUpload(request.mask, signal);
     }
-    return this.#invoke(() => this.#sdk.images.edit(body));
+    signal?.throwIfAborted();
+    return this.#invoke(
+      () => signal === void 0 ? this.#sdk.images.edit(body) : this.#sdk.images.edit(body, { signal }),
+      signal
+    );
   }
-  async #invoke(call) {
+  async #invoke(call, signal) {
+    signal?.throwIfAborted();
     let apiPromise;
     try {
       apiPromise = call();
     } catch (error51) {
+      if (signal?.aborted) {
+        signal.throwIfAborted();
+      }
       throw mapOpenAIError(error51);
     }
     const rawResponsePromise = apiPromise.asResponse().catch(() => void 0);
@@ -37188,7 +37260,13 @@ var OpenAIImageClient = class {
     try {
       response = await apiPromise.withResponse();
     } catch (error51) {
+      if (signal?.aborted) {
+        signal.throwIfAborted();
+      }
       const rawResponse = await rawResponsePromise;
+      if (signal?.aborted) {
+        signal.throwIfAborted();
+      }
       if (rawResponse?.ok) {
         throw invalidProviderResponse(
           rawResponse.headers.get("x-request-id")
@@ -37196,9 +37274,138 @@ var OpenAIImageClient = class {
       }
       throw mapOpenAIError(error51);
     }
+    signal?.throwIfAborted();
     return extractProviderImage(response);
   }
 };
+
+// src/concurrency.ts
+var PAID_CALL_MAX_PENDING = 8;
+var Semaphore = class {
+  #available;
+  #maxPending;
+  #pending = 0;
+  #queueHead;
+  #queueTail;
+  constructor(capacity = 1, maxPending = Number.MAX_SAFE_INTEGER) {
+    if (!Number.isSafeInteger(capacity) || capacity < 1) {
+      throw new RangeError("Semaphore capacity must be a positive integer");
+    }
+    if (!Number.isSafeInteger(maxPending) || maxPending < 0) {
+      throw new RangeError("Semaphore pending limit must be a non-negative integer");
+    }
+    this.#available = capacity;
+    this.#maxPending = maxPending;
+  }
+  get pendingCount() {
+    return this.#pending;
+  }
+  async runExclusive(operation, signal) {
+    const release = await this.#acquire(signal);
+    try {
+      signal?.throwIfAborted();
+      return await operation();
+    } finally {
+      release();
+    }
+  }
+  #acquire(signal) {
+    signal?.throwIfAborted();
+    if (this.#available > 0) {
+      this.#available -= 1;
+      return Promise.resolve(this.#makeRelease());
+    }
+    if (this.#pending >= this.#maxPending) {
+      return Promise.reject(
+        new AppError(
+          "RATE_LIMITED",
+          "Too many paid image requests are already queued"
+        )
+      );
+    }
+    return new Promise((resolve, reject2) => {
+      const waiter = {
+        resolve,
+        reject: reject2,
+        previous: this.#queueTail,
+        next: void 0,
+        signal,
+        abort: void 0,
+        queued: true
+      };
+      if (this.#queueTail === void 0) {
+        this.#queueHead = waiter;
+      } else {
+        this.#queueTail.next = waiter;
+      }
+      this.#queueTail = waiter;
+      this.#pending += 1;
+      if (signal !== void 0) {
+        waiter.abort = () => {
+          if (!this.#removeWaiter(waiter)) {
+            return;
+          }
+          waiter.reject(signal.reason);
+        };
+        signal.addEventListener("abort", waiter.abort, { once: true });
+        if (signal.aborted) {
+          waiter.abort();
+        }
+      }
+    });
+  }
+  #removeWaiter(waiter) {
+    if (!waiter.queued) {
+      return false;
+    }
+    waiter.queued = false;
+    this.#pending -= 1;
+    if (waiter.previous === void 0) {
+      this.#queueHead = waiter.next;
+    } else {
+      waiter.previous.next = waiter.next;
+    }
+    if (waiter.next === void 0) {
+      this.#queueTail = waiter.previous;
+    } else {
+      waiter.next.previous = waiter.previous;
+    }
+    waiter.previous = void 0;
+    waiter.next = void 0;
+    if (waiter.signal !== void 0 && waiter.abort !== void 0) {
+      waiter.signal.removeEventListener("abort", waiter.abort);
+    }
+    return true;
+  }
+  #makeRelease() {
+    let released = false;
+    return () => {
+      if (released) {
+        return;
+      }
+      released = true;
+      const next = this.#queueHead;
+      if (next !== void 0) {
+        this.#removeWaiter(next);
+        next.resolve(this.#makeRelease());
+        return;
+      }
+      this.#available += 1;
+    };
+  }
+};
+var processPaidCallGate = new Semaphore(1, PAID_CALL_MAX_PENDING);
+
+// src/process-context.ts
+function createProcessToolContext(options) {
+  return {
+    config: options.config,
+    roots: options.roots,
+    ...options.provider === void 0 ? {} : { provider: options.provider },
+    paidCallGate: processPaidCallGate,
+    serverVersion: options.serverVersion
+  };
+}
 
 // src/server.ts
 import { fileURLToPath } from "node:url";
@@ -45260,6 +45467,7 @@ var editImageSchema = external_exports.preprocess((input) => input, editObjectSc
 
 // src/tools/types.ts
 import path7 from "node:path";
+import { setTimeout as scheduleTimeout3 } from "node:timers";
 
 // src/files/atomic-output.ts
 import { randomBytes } from "node:crypto";
@@ -45272,7 +45480,7 @@ import {
   realpath as realpath3,
   rm as rm2
 } from "node:fs/promises";
-import { setTimeout as scheduleTimeout } from "node:timers";
+import { setTimeout as scheduleTimeout2 } from "node:timers";
 import { setTimeout as delay } from "node:timers/promises";
 import path4 from "node:path";
 
@@ -45330,7 +45538,7 @@ var nodePublicationOperations = {
     await rm2(tempPath, { force: true });
   },
   deferCleanup(task) {
-    const timer = scheduleTimeout(() => {
+    const timer = scheduleTimeout2(() => {
       void task().catch(() => void 0);
     }, 1e3);
     timer.unref();
@@ -45546,15 +45754,19 @@ async function removeTemporaryWithRetries(operations, tempPath) {
   );
 }
 async function publishOutputWithOperations(options, operations) {
+  options.signal?.throwIfAborted();
   assertOutputExtension(options.output, options.format);
   const bytes = decodeStrictBase64(options.base64, MAX_IMAGE_BYTES);
+  options.signal?.throwIfAborted();
   const canonicalParent = await canonicalOutputParent(options.output);
+  options.signal?.throwIfAborted();
   const filename = path4.basename(options.output.absolutePath);
   const finalPath = path4.join(canonicalParent, filename);
   if (!isSamePath(finalPath, options.output.absolutePath)) {
     throw pathFailure("Output destination changed during publication");
   }
   await assertDestinationAbsent(finalPath);
+  options.signal?.throwIfAborted();
   let tempPath;
   let publicationCommitted = false;
   let cleanupPending = false;
@@ -45565,8 +45777,11 @@ async function publishOutputWithOperations(options, operations) {
       canonicalParent,
       bytes
     );
+    options.signal?.throwIfAborted();
     const info = await validateProviderSnapshot(tempPath, options.format);
+    options.signal?.throwIfAborted();
     await recheckCanonicalParent(options.output, canonicalParent);
+    options.signal?.throwIfAborted();
     await publishHardLink(operations, tempPath, finalPath);
     publicationCommitted = true;
     published = {
@@ -45665,6 +45880,20 @@ var WINDOWS_RESERVED_NAMES = /* @__PURE__ */ new Set([
 function reject(message) {
   throw new AppError("PATH_OUTSIDE_WORKSPACE", message);
 }
+function isUnsafePathTextCharacter(character) {
+  const codePoint = character.codePointAt(0);
+  return codePoint <= 31 || codePoint >= 127 && codePoint <= 159 || codePoint === 1564 || codePoint === 8206 || codePoint === 8207 || codePoint === 8232 || codePoint === 8233 || codePoint >= 8234 && codePoint <= 8238 || codePoint >= 8294 && codePoint <= 8297;
+}
+function assertSafePathText(value) {
+  if (value.includes("\0")) {
+    reject("Path must not contain NUL bytes");
+  }
+  for (const character of value) {
+    if (isUnsafePathTextCharacter(character)) {
+      reject("Path must not contain control or bidirectional formatting characters");
+    }
+  }
+}
 function assertPortableRelativePath(value) {
   if (typeof value !== "string") {
     throw new AppError("INVALID_INPUT", "Path must be a string");
@@ -45672,9 +45901,7 @@ function assertPortableRelativePath(value) {
   if (value.length === 0 || value.trim().length === 0) {
     throw new AppError("INVALID_INPUT", "Path must not be empty");
   }
-  if (value.includes("\0")) {
-    reject("Path must not contain NUL bytes");
-  }
+  assertSafePathText(value);
   if (value.startsWith("/") || value.startsWith("\\")) {
     reject("Absolute or UNC paths are not allowed as relative paths");
   }
@@ -45804,9 +46031,7 @@ var WorkspacePaths = class {
     if (typeof userPath !== "string" || userPath.trim() === "") {
       throw new AppError("INVALID_INPUT", "Input path must be a non-empty string");
     }
-    if (userPath.includes("\0")) {
-      throw new AppError("PATH_OUTSIDE_WORKSPACE", "Path must not contain NUL bytes");
-    }
+    assertSafePathText(userPath);
     if (looksAbsolute(userPath)) {
       return this.#resolveAbsoluteInput(userPath, workspaceRootSelector);
     }
@@ -45827,9 +46052,7 @@ var WorkspacePaths = class {
     if (typeof userPath !== "string" || userPath.trim() === "") {
       throw new AppError("INVALID_INPUT", "Output path must be a non-empty string");
     }
-    if (userPath.includes("\0")) {
-      throw new AppError("PATH_OUTSIDE_WORKSPACE", "Path must not contain NUL bytes");
-    }
+    assertSafePathText(userPath);
     if (looksAbsolute(userPath)) {
       throw new AppError(
         "PATH_OUTSIDE_WORKSPACE",
@@ -45968,6 +46191,12 @@ var WorkspacePaths = class {
 var MODEL = "gpt-image-2";
 var DEFAULT_RELATIVE_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image-2";
 var INLINE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
+function deferCleanup(task) {
+  const timer = scheduleTimeout3(() => {
+    void task().catch(() => void 0);
+  }, 1e3);
+  timer.unref();
+}
 function getToolOperations(context) {
   if (context.operations !== void 0) {
     return context.operations;
@@ -45976,7 +46205,8 @@ function getToolOperations(context) {
     paths: new WorkspacePaths(context.roots),
     snapshotInputs,
     publishOutput,
-    makeDefaultOutputPath
+    makeDefaultOutputPath,
+    deferCleanup
   };
 }
 function requireImageProvider(context) {
@@ -46003,6 +46233,33 @@ function assertOutputFormat(output, format) {
 }
 
 // src/tools/result.ts
+function isUnsafeResultTextCharacter(character) {
+  const codePoint = character.codePointAt(0);
+  return codePoint <= 31 || codePoint >= 127 && codePoint <= 159 || codePoint === 1564 || codePoint === 8206 || codePoint === 8207 || codePoint === 8232 || codePoint === 8233 || codePoint >= 8234 && codePoint <= 8238 || codePoint >= 8294 && codePoint <= 8297;
+}
+function formatUntrustedInlineData(value) {
+  let escaped = "";
+  for (const character of value) {
+    if (isUnsafeResultTextCharacter(character)) {
+      const codePoint = character.codePointAt(0);
+      escaped += `\\u${codePoint.toString(16).padStart(4, "0")}`;
+    } else {
+      escaped += character;
+    }
+  }
+  let longestBacktickRun = 0;
+  let currentBacktickRun = 0;
+  for (const character of escaped) {
+    if (character === "`") {
+      currentBacktickRun += 1;
+      longestBacktickRun = Math.max(longestBacktickRun, currentBacktickRun);
+    } else {
+      currentBacktickRun = 0;
+    }
+  }
+  const delimiter = "`".repeat(longestBacktickRun + 1);
+  return `${delimiter} ${escaped} ${delimiter}`;
+}
 function readNonNegativeInteger2(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : void 0;
 }
@@ -46122,7 +46379,7 @@ function toMcpSuccess(output) {
   const content = [
     {
       type: "text",
-      text: `Saved ${output.model} image to ${output.relative_path} (${output.actual_width}x${output.actual_height}, ${output.format}, ${output.size_bytes} bytes).${warningSuffix}`
+      text: `Saved ${output.model} image to ${formatUntrustedInlineData(output.relative_path)} (${output.actual_width}x${output.actual_height}, ${output.format}, ${output.size_bytes} bytes).${warningSuffix}`
     }
   ];
   if (output.preview_included && output.preview !== void 0) {
@@ -46183,7 +46440,8 @@ function assertMaskValid(images, mask) {
     );
   }
 }
-async function editImage(input, context) {
+async function editImage(input, context, signal) {
+  signal?.throwIfAborted();
   assertImageCount(input);
   const provider = requireImageProvider(context);
   const operations = getToolOperations(context);
@@ -46193,6 +46451,7 @@ async function editImage(input, context) {
       (inputPath) => operations.paths.resolveInput(inputPath, input.workspace_root)
     )
   );
+  signal?.throwIfAborted();
   const resolvedImages = resolvedInputs.slice(0, input.image_paths.length);
   const resolvedMask = input.mask_path === void 0 ? void 0 : resolvedInputs[input.image_paths.length];
   const requestedOutputPath = selectOutputPath(
@@ -46204,6 +46463,7 @@ async function editImage(input, context) {
     requestedOutputPath,
     input.workspace_root
   );
+  signal?.throwIfAborted();
   if (resolvedInputs.some(
     (resolved) => isSamePath(resolved.absolutePath, outputIdentity.absolutePath)
   )) {
@@ -46212,66 +46472,109 @@ async function editImage(input, context) {
       "Output path must not identify an edit input or mask"
     );
   }
-  const output = await operations.paths.resolveOutput(
-    requestedOutputPath,
-    input.workspace_root
-  );
-  assertOutputFormat(output, input.output_format);
-  const snapshotSet = await operations.snapshotInputs(
-    resolvedInputs,
-    context.config.pluginDataRoot
-  );
-  try {
-    if (snapshotSet.snapshots.length !== resolvedInputs.length) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Input snapshots were not prepared correctly"
-      );
-    }
-    const imageSnapshots = snapshotSet.snapshots.slice(
-      0,
-      resolvedImages.length
+  return context.paidCallGate.runExclusive(async () => {
+    signal?.throwIfAborted();
+    const output = await operations.paths.resolveOutput(
+      requestedOutputPath,
+      input.workspace_root
     );
-    const maskSnapshot = resolvedMask === void 0 ? void 0 : snapshotSet.snapshots[resolvedImages.length];
-    if (maskSnapshot !== void 0) {
-      assertMaskValid(imageSnapshots, maskSnapshot);
-    } else if (resolvedMask !== void 0) {
-      throw new AppError(
-        "INTERNAL_ERROR",
-        "Mask snapshot was not prepared correctly"
+    assertOutputFormat(output, input.output_format);
+    signal?.throwIfAborted();
+    const snapshotSet = await operations.snapshotInputs(
+      resolvedInputs,
+      context.config.pluginDataRoot,
+      signal
+    );
+    let result;
+    let operationFailed = false;
+    let operationError;
+    try {
+      signal?.throwIfAborted();
+      if (snapshotSet.snapshots.length !== resolvedInputs.length) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Input snapshots were not prepared correctly"
+        );
+      }
+      const imageSnapshots = snapshotSet.snapshots.slice(
+        0,
+        resolvedImages.length
       );
+      const maskSnapshot = resolvedMask === void 0 ? void 0 : snapshotSet.snapshots[resolvedImages.length];
+      if (maskSnapshot !== void 0) {
+        assertMaskValid(imageSnapshots, maskSnapshot);
+      } else if (resolvedMask !== void 0) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Mask snapshot was not prepared correctly"
+        );
+      }
+      const request = {
+        prompt: input.prompt,
+        quality: input.quality,
+        size: input.size,
+        output_format: input.output_format,
+        ...input.output_compression === void 0 ? {} : { output_compression: input.output_compression },
+        images: imageSnapshots,
+        ...maskSnapshot === void 0 ? {} : { mask: maskSnapshot }
+      };
+      signal?.throwIfAborted();
+      const providerImage = await provider.edit(request, signal);
+      signal?.throwIfAborted();
+      const published = await operations.publishOutput({
+        output,
+        base64: providerImage.base64,
+        format: input.output_format,
+        ...signal === void 0 ? {} : { signal }
+      });
+      result = buildImageToolOutput({
+        requestedSize: input.size,
+        quality: input.quality,
+        output,
+        providerImage,
+        published
+      });
+    } catch (error51) {
+      operationFailed = true;
+      operationError = error51;
     }
-    const request = {
-      prompt: input.prompt,
-      quality: input.quality,
-      size: input.size,
-      output_format: input.output_format,
-      ...input.output_compression === void 0 ? {} : { output_compression: input.output_compression },
-      images: imageSnapshots,
-      ...maskSnapshot === void 0 ? {} : { mask: maskSnapshot }
+    const disposeAfterFailure = async (error51) => {
+      try {
+        await snapshotSet.dispose();
+      } catch {
+        try {
+          operations.deferCleanup(() => snapshotSet.dispose());
+        } catch {
+        }
+      }
+      throw error51;
     };
-    const providerImage = await context.paidCallGate.runExclusive(
-      () => provider.edit(request)
-    );
-    const published = await operations.publishOutput({
-      output,
-      base64: providerImage.base64,
-      format: input.output_format
-    });
-    return buildImageToolOutput({
-      requestedSize: input.size,
-      quality: input.quality,
-      output,
-      providerImage,
-      published
-    });
-  } finally {
-    await snapshotSet.dispose();
-  }
+    if (operationFailed) {
+      return disposeAfterFailure(operationError);
+    }
+    if (result === void 0) {
+      return disposeAfterFailure(
+        new AppError("INTERNAL_ERROR", "Edit result was not constructed")
+      );
+    }
+    try {
+      await snapshotSet.dispose();
+    } catch {
+      try {
+        operations.deferCleanup(() => snapshotSet.dispose());
+      } catch {
+      }
+      result = {
+        ...result,
+        warnings: [...result.warnings, "SNAPSHOT_CLEANUP_PENDING"]
+      };
+    }
+    return result;
+  }, signal);
 }
 
 // src/tools/generate-image.ts
-async function generateImage(input, context) {
+async function generateImage(input, context, signal) {
   const provider = requireImageProvider(context);
   const operations = getToolOperations(context);
   const requestedOutputPath = selectOutputPath(
@@ -46279,11 +46582,6 @@ async function generateImage(input, context) {
     input.output_format,
     operations
   );
-  const output = await operations.paths.resolveOutput(
-    requestedOutputPath,
-    input.workspace_root
-  );
-  assertOutputFormat(output, input.output_format);
   const request = {
     prompt: input.prompt,
     quality: input.quality,
@@ -46292,21 +46590,30 @@ async function generateImage(input, context) {
     ...input.output_compression === void 0 ? {} : { output_compression: input.output_compression },
     moderation: input.moderation
   };
-  const providerImage = await context.paidCallGate.runExclusive(
-    () => provider.generate(request)
-  );
-  const published = await operations.publishOutput({
-    output,
-    base64: providerImage.base64,
-    format: input.output_format
-  });
-  return buildImageToolOutput({
-    requestedSize: input.size,
-    quality: input.quality,
-    output,
-    providerImage,
-    published
-  });
+  return context.paidCallGate.runExclusive(async () => {
+    signal?.throwIfAborted();
+    const output = await operations.paths.resolveOutput(
+      requestedOutputPath,
+      input.workspace_root
+    );
+    assertOutputFormat(output, input.output_format);
+    signal?.throwIfAborted();
+    const providerImage = await provider.generate(request, signal);
+    signal?.throwIfAborted();
+    const published = await operations.publishOutput({
+      output,
+      base64: providerImage.base64,
+      format: input.output_format,
+      ...signal === void 0 ? {} : { signal }
+    });
+    return buildImageToolOutput({
+      requestedSize: input.size,
+      quality: input.quality,
+      output,
+      providerImage,
+      published
+    });
+  }, signal);
 }
 
 // src/tools/status.ts
@@ -46389,7 +46696,13 @@ var imageSuccessOutputSchema = external_exports.strictObject({
   preview_included: external_exports.boolean(),
   request_id: external_exports.string().max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).optional(),
   usage: usageSchema.optional(),
-  warnings: external_exports.array(external_exports.enum(["TEMP_CLEANUP_PENDING", "SIZE_MISMATCH"]))
+  warnings: external_exports.array(
+    external_exports.enum([
+      "TEMP_CLEANUP_PENDING",
+      "SIZE_MISMATCH",
+      "SNAPSHOT_CLEANUP_PENDING"
+    ])
+  )
 });
 var STATUS_ANNOTATIONS = {
   readOnlyHint: true,
@@ -46542,21 +46855,27 @@ function createImageServer(dependencies) {
       return toolFailure(error51);
     }
   };
-  const runGenerate = async (input) => {
+  const runGenerate = async (input, signal) => {
     try {
+      signal?.throwIfAborted();
       const parsed = parseToolInput(generateImageSchema, input);
       await waitForRootSynchronization();
-      return toMcpSuccess(await generateImage(parsed, context));
+      signal?.throwIfAborted();
+      return toMcpSuccess(await generateImage(parsed, context, signal));
     } catch (error51) {
+      signal?.throwIfAborted();
       return toolFailure(error51);
     }
   };
-  const runEdit = async (input) => {
+  const runEdit = async (input, signal) => {
     try {
+      signal?.throwIfAborted();
       const parsed = parseToolInput(editImageSchema, input);
       await waitForRootSynchronization();
-      return toMcpSuccess(await editImage(parsed, context));
+      signal?.throwIfAborted();
+      return toMcpSuccess(await editImage(parsed, context, signal));
     } catch (error51) {
+      signal?.throwIfAborted();
       return toolFailure(error51);
     }
   };
@@ -46580,7 +46899,7 @@ function createImageServer(dependencies) {
       outputSchema: imageSuccessOutputSchema,
       annotations: IMAGE_ANNOTATIONS
     },
-    (input) => runGenerate(input)
+    (input, extra) => runGenerate(input, extra.signal)
   );
   server.registerTool(
     "edit_image",
@@ -46591,7 +46910,7 @@ function createImageServer(dependencies) {
       outputSchema: imageSuccessOutputSchema,
       annotations: IMAGE_ANNOTATIONS
     },
-    (input) => runEdit(input)
+    (input, extra) => runEdit(input, extra.signal)
   );
   const advertisedTools = [
     {
@@ -46622,14 +46941,14 @@ function createImageServer(dependencies) {
   server.server.setRequestHandler(ListToolsRequestSchema, () => ({
     tools: [...advertisedTools]
   }));
-  const rawCallToolHandler = (request) => {
+  const rawCallToolHandler = (request, extra) => {
     switch (request.params.name) {
       case "get_status":
         return runStatus(request.params.arguments);
       case "generate_image":
-        return runGenerate(request.params.arguments);
+        return runGenerate(request.params.arguments, extra.signal);
       case "edit_image":
-        return runEdit(request.params.arguments);
+        return runEdit(request.params.arguments, extra.signal);
       default:
         return toolFailure(
           new AppError("INVALID_INPUT", "Requested image tool is not available")
@@ -46656,7 +46975,7 @@ function createImageServer(dependencies) {
 }
 
 // src/index.ts
-var SERVER_VERSION = "0.1.0";
+var SERVER_VERSION = "0.1.1";
 var logger = createSafeLogger();
 async function main() {
   const config2 = loadEnvironment(process.env);
@@ -46677,13 +46996,12 @@ async function main() {
     apiKey: config2.apiKey,
     baseURL: config2.baseUrl
   }) : void 0;
-  const context = {
+  const context = createProcessToolContext({
     config: config2,
     roots,
     ...provider === void 0 ? {} : { provider },
-    paidCallGate: processPaidCallGate,
     serverVersion: SERVER_VERSION
-  };
+  });
   const server = createImageServer({
     context,
     logger,

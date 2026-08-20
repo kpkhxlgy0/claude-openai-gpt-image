@@ -10,6 +10,7 @@ import {
   rm,
   symlink,
   writeFile,
+  type FileHandle,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -65,6 +66,149 @@ async function writeSparseFile(filePath: string, size: number): Promise<void> {
     await handle.close();
   }
 }
+
+test("snapshotInputs rejects a pre-aborted request without creating snapshot storage", async () => {
+  await withLifecycleFixture(async ({ root, pluginDataRoot, paths }) => {
+    await writeFile(path.join(root, "cancelled.png"), makePng());
+    const resolved = await paths.resolveInput("cancelled.png");
+    const controller = new AbortController();
+    controller.abort();
+
+    await assert.rejects(
+      () => snapshotInputs([resolved], pluginDataRoot, controller.signal),
+      (error: unknown) =>
+        error instanceof DOMException && error.name === "AbortError",
+    );
+    assert.deepEqual(await readdir(pluginDataRoot), []);
+  });
+});
+
+test("snapshotInputs cancels an in-progress copy and removes partial storage", async () => {
+  await withLifecycleFixture(async ({ root, pluginDataRoot, paths }) => {
+    await writeFile(path.join(root, "copy-cancelled.png"), makePng());
+    const resolved = await paths.resolveInput("copy-cancelled.png");
+    const controller = new AbortController();
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      markReadStarted = resolve;
+    });
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const snapshotter = createInputSnapshotter({
+      async readInput(
+        handle: FileHandle,
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ) {
+        markReadStarted();
+        await readReleased;
+        return handle.read(buffer, offset, length, position);
+      },
+    });
+    const snapshotOutcome = snapshotter(
+      [resolved],
+      pluginDataRoot,
+      controller.signal,
+    ).then(
+      async (set) => {
+        await set.dispose();
+        return { status: "fulfilled" as const };
+      },
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    const firstOutcome = await Promise.race([
+      readStarted.then(() => "read-started" as const),
+      snapshotOutcome.then(() => "snapshot-completed" as const),
+    ]);
+    assert.equal(firstOutcome, "read-started");
+    controller.abort();
+    releaseRead();
+    const outcome = await snapshotOutcome;
+
+    assert.equal(outcome.status, "rejected");
+    if (outcome.status !== "rejected") {
+      assert.fail("Expected snapshot creation to reject");
+    }
+    assert.ok(outcome.error instanceof DOMException);
+    assert.equal(outcome.error.name, "AbortError");
+    assert.deepEqual(await readdir(pluginDataRoot), []);
+  });
+});
+
+test("snapshotInputs preserves cancellation and defers failed partial cleanup", async () => {
+  await withLifecycleFixture(async ({ root, pluginDataRoot, paths }) => {
+    await writeFile(path.join(root, "copy-cancelled-cleanup.png"), makePng());
+    const resolved = await paths.resolveInput("copy-cancelled-cleanup.png");
+    const controller = new AbortController();
+    let markReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => {
+      markReadStarted = resolve;
+    });
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    let cleanupAttempts = 0;
+    let deferredCleanup: (() => Promise<void>) | undefined;
+    const snapshotter = createInputSnapshotter({
+      async readInput(
+        handle: FileHandle,
+        buffer: Buffer,
+        offset: number,
+        length: number,
+        position: number,
+      ) {
+        markReadStarted();
+        await readReleased;
+        return handle.read(buffer, offset, length, position);
+      },
+      async removeSnapshotDirectory(snapshotDirectory) {
+        cleanupAttempts += 1;
+        if (cleanupAttempts === 1) {
+          throw Object.assign(new Error("simulated transient cleanup failure"), {
+            code: "EPERM",
+          });
+        }
+        await rm(snapshotDirectory, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
+        });
+      },
+      deferCleanup(task) {
+        deferredCleanup = task;
+      },
+    } as Parameters<typeof createInputSnapshotter>[0]);
+    const outcomePromise = snapshotter(
+      [resolved],
+      pluginDataRoot,
+      controller.signal,
+    ).then(
+      () => assert.fail("Expected snapshot creation to reject"),
+      (error: unknown) => error,
+    );
+
+    await readStarted;
+    controller.abort();
+    releaseRead();
+    const outcome = await outcomePromise;
+
+    assert.ok(outcome instanceof DOMException);
+    assert.equal(outcome.name, "AbortError");
+    assert.equal(cleanupAttempts, 1);
+    assert.equal(typeof deferredCleanup, "function");
+    assert.equal((await readdir(pluginDataRoot)).length, 1);
+
+    await deferredCleanup!();
+    assert.equal(cleanupAttempts, 2);
+    assert.deepEqual(await readdir(pluginDataRoot), []);
+  });
+});
 
 test("snapshotInputs rejects a sparse file above 50 MiB before copying it", async () => {
   await withLifecycleFixture(async ({ root, pluginDataRoot, paths }) => {
@@ -259,19 +403,30 @@ test("snapshot disposal can retry after an exhausted cleanup attempt", async () 
   });
 });
 
-test("snapshot creation surfaces sanitized cleanup exhaustion", async () => {
+test("snapshot creation preserves the input failure and defers exhausted cleanup", async () => {
   await withLifecycleFixture(async ({ root, pluginDataRoot, paths }) => {
     await writeFile(path.join(root, "partial-valid.png"), makePng());
     await writeFile(path.join(root, "partial-invalid.png"), "not an image");
     let cleanupAttempts = 0;
+    let deferredCleanup: (() => Promise<void>) | undefined;
     const snapshotter = createInputSnapshotter({
-      async removeSnapshotDirectory() {
+      async removeSnapshotDirectory(snapshotDirectory) {
         cleanupAttempts += 1;
-        throw Object.assign(new Error("simulated persistent cleanup failure"), {
-          code: "EPERM",
+        if (cleanupAttempts === 1) {
+          throw Object.assign(new Error("simulated transient cleanup failure"), {
+            code: "EPERM",
+          });
+        }
+        await rm(snapshotDirectory, {
+          recursive: true,
+          force: true,
+          maxRetries: 3,
         });
       },
-    });
+      deferCleanup(task) {
+        deferredCleanup = task;
+      },
+    } as Parameters<typeof createInputSnapshotter>[0]);
     const resolved = await Promise.all([
       paths.resolveInput("partial-valid.png"),
       paths.resolveInput("partial-invalid.png"),
@@ -281,12 +436,16 @@ test("snapshot creation surfaces sanitized cleanup exhaustion", async () => {
       snapshotter(resolved, pluginDataRoot),
     );
 
-    assert.equal(hasCode("INTERNAL_ERROR")(failure), true);
-    assert.match(String(failure), /could not be removed safely/);
+    assert.equal(hasCode("INPUT_FILE_INVALID")(failure), true);
     assert.equal(String(failure).includes(root), false);
     assert.equal(String(failure).includes(pluginDataRoot), false);
     assert.equal(cleanupAttempts, 1);
+    assert.equal(typeof deferredCleanup, "function");
     assert.equal((await readdir(pluginDataRoot)).length, 1);
+
+    await deferredCleanup!();
+    assert.equal(cleanupAttempts, 2);
+    assert.deepEqual(await readdir(pluginDataRoot), []);
   });
 });
 
@@ -417,6 +576,53 @@ test("publishOutput publishes only a fully validated image", async () => {
     });
     assert.deepEqual(await readFile(output.absolutePath), bytes);
     assert.deepEqual(await readdir(output.parentPath), ["final.png"]);
+  });
+});
+
+test("publishOutput cancels before commit and removes temporary residue", async () => {
+  await withLifecycleFixture(async ({ paths }) => {
+    const output = await paths.resolveOutput("outputs/cancelled-publication.png");
+    const controller = new AbortController();
+    let markWriteStarted!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      markWriteStarted = resolve;
+    });
+    let releaseWrite!: () => void;
+    const writeReleased = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    let publicationCalls = 0;
+    const publisher = createOutputPublisher({
+      async writeAndFlushTemporary(handle, bytes) {
+        markWriteStarted();
+        await writeReleased;
+        await handle.writeFile(bytes);
+        await handle.sync();
+      },
+      async createPublicationLink() {
+        publicationCalls += 1;
+      },
+    });
+    const publication = publisher({
+      output,
+      base64: makePng().toString("base64"),
+      format: "png",
+      signal: controller.signal,
+    } as Parameters<typeof publisher>[0]).then(
+      () => assert.fail("Expected publication cancellation"),
+      (error: unknown) => error,
+    );
+
+    await writeStarted;
+    controller.abort();
+    releaseWrite();
+    const failure = await publication;
+
+    assert.ok(failure instanceof DOMException);
+    assert.equal(failure.name, "AbortError");
+    assert.equal(publicationCalls, 0);
+    await assert.rejects(() => access(output.absolutePath), { code: "ENOENT" });
+    assert.deepEqual(await readdir(output.parentPath), []);
   });
 });
 

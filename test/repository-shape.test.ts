@@ -29,7 +29,7 @@ test("repository root is the single marketplace plugin", async () => {
 test("package scripts and engines match the scaffold contract", async () => {
   const pkg = await json("package.json");
   assert.equal(pkg.name, "claude-openai-gpt-image");
-  assert.equal(pkg.version, "0.1.0");
+  assert.equal(pkg.version, "0.1.1");
   assert.equal(pkg.private, true);
   assert.equal(pkg.type, "module");
   assert.equal(pkg.engines.node, ">=20");
@@ -38,8 +38,37 @@ test("package scripts and engines match the scaffold contract", async () => {
     test: "tsx --test test/**/*.test.ts",
     build: "node scripts/build.mjs",
     "test:dist": "tsx --test test/dist/**/*.test.ts",
+    "test:host": "tsx --test test/host/**/*.smoke.ts",
     validate: "node scripts/validate-package.mjs",
   });
+});
+
+test("release version is synchronized across source and package metadata", async () => {
+  const [pkg, lock, plugin, marketplace, entrypoint] = await Promise.all([
+    json("package.json"),
+    json("package-lock.json"),
+    json(".claude-plugin/plugin.json"),
+    json(".claude-plugin/marketplace.json"),
+    readFile("src/index.ts", "utf8"),
+  ]);
+
+  assert.equal(pkg.version, "0.1.1");
+  assert.equal(lock.version, pkg.version);
+  assert.equal(lock.packages[""].version, pkg.version);
+  assert.equal(plugin.version, pkg.version);
+  assert.equal(marketplace.plugins[0].version, pkg.version);
+  assert.match(entrypoint, /const SERVER_VERSION = "0\.1\.1";/);
+});
+
+test("production entry point delegates process tool-context wiring", async () => {
+  const entrypoint = await readFile("src/index.ts", "utf8");
+
+  assert.match(
+    entrypoint,
+    /import \{ createProcessToolContext \} from "\.\/process-context\.ts";/,
+  );
+  assert.match(entrypoint, /const context = createProcessToolContext\(\{/);
+  assert.doesNotMatch(entrypoint, /processPaidCallGate|paidCallGate\s*:/);
 });
 
 test("marketplace owner is KPK and plugin version matches package", async () => {
@@ -57,6 +86,8 @@ test("required scaffold files exist", async () => {
     ".gitignore",
     "tsconfig.json",
     "scripts/build.mjs",
+    "scripts/git-index.mjs",
+    "scripts/git-index.d.mts",
     "scripts/validate-package.mjs",
     "src/index.ts",
     "dist/server.mjs",

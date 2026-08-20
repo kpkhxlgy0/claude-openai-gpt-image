@@ -1,4 +1,7 @@
-import { validateOpenAIBaseUrl } from "./base-url.ts";
+import {
+  DEFAULT_OPENAI_BASE_URL,
+  validateOpenAIBaseUrl,
+} from "./base-url.ts";
 
 export interface RuntimeConfig {
   apiKeyConfigured: boolean;
@@ -26,11 +29,13 @@ export function loadEnvironment(env: NodeJS.ProcessEnv): RuntimeConfig {
     typeof rawKey === "string" && rawKey.trim() !== "";
 
   const rawBaseUrl = env.OPENAI_BASE_URL;
-  const baseUrlConfigured =
-    typeof rawBaseUrl === "string" && rawBaseUrl.trim() !== "";
+  const baseUrlProvided =
+    typeof rawBaseUrl === "string" && rawBaseUrl !== "";
   const baseUrl = validateOpenAIBaseUrl(
-    baseUrlConfigured ? rawBaseUrl : undefined,
+    baseUrlProvided ? rawBaseUrl : undefined,
   );
+  const baseUrlConfigured =
+    baseUrlProvided && baseUrl !== DEFAULT_OPENAI_BASE_URL;
 
   const config: RuntimeConfig = {
     apiKeyConfigured,

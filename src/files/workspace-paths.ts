@@ -3,6 +3,7 @@ import path from "node:path";
 import { AppError } from "../errors.ts";
 import {
   assertPortableRelativePath,
+  assertSafePathText,
   toPosixRelative,
 } from "./windows-paths.ts";
 import {
@@ -152,9 +153,7 @@ export class WorkspacePaths {
     if (typeof userPath !== "string" || userPath.trim() === "") {
       throw new AppError("INVALID_INPUT", "Input path must be a non-empty string");
     }
-    if (userPath.includes("\0")) {
-      throw new AppError("PATH_OUTSIDE_WORKSPACE", "Path must not contain NUL bytes");
-    }
+    assertSafePathText(userPath);
 
     if (looksAbsolute(userPath)) {
       return this.#resolveAbsoluteInput(userPath, workspaceRootSelector);
@@ -183,9 +182,7 @@ export class WorkspacePaths {
     if (typeof userPath !== "string" || userPath.trim() === "") {
       throw new AppError("INVALID_INPUT", "Output path must be a non-empty string");
     }
-    if (userPath.includes("\0")) {
-      throw new AppError("PATH_OUTSIDE_WORKSPACE", "Path must not contain NUL bytes");
-    }
+    assertSafePathText(userPath);
     if (looksAbsolute(userPath)) {
       throw new AppError(
         "PATH_OUTSIDE_WORKSPACE",
