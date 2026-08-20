@@ -180,8 +180,6 @@ test("setup command uses only get_status for diagnosis and makes no image reques
     [
       /only.{0,30}\bget_status\b|\bget_status\b.{0,30}only/is,
       /no (?:paid|image) API request was made/i,
-      /Claude Desktop Code/i,
-      /plugin settings/i,
       /API key/i,
       /Base URL/i,
     ],
@@ -197,6 +195,102 @@ test("setup command uses only get_status for diagnosis and makes no image reques
     ],
     "setup command",
   );
+});
+
+test("configuration guidance uses the Claude Code TUI and reloads Desktop MCP configuration", async () => {
+  const [setup, primarySkill, english, chinese] = await Promise.all([
+    text("commands/setup.md"),
+    text("skills/gpt-image-2/SKILL.md"),
+    text("README.md"),
+    text("README.zh-CN.md"),
+  ]);
+
+  for (const [label, source] of [
+    ["setup command", setup],
+    ["primary Skill", primarySkill],
+    ["README.md", english],
+    ["README.zh-CN.md", chinese],
+  ] as const) {
+    assertIncludesAll(
+      source,
+      ["`/plugin`", "Installed", "`gpt-image-2`", "Configure options"],
+      `${label} configuration path`,
+    );
+    assert.doesNotMatch(
+      source,
+      /Claude Desktop(?: Code)?(?: GUI)?[^\r\n.]{0,120}(?:plugin settings|插件设置)/i,
+      `${label} must not claim Claude Desktop provides plugin settings`,
+    );
+    assert.doesNotMatch(
+      source,
+      /reload or restart the plugin|重新加载或重启插件/i,
+      `${label} must use the canonical Desktop MCP reload guidance`,
+    );
+  }
+
+  assertMatchesAll(
+    setup,
+    [
+      /Claude Desktop itself does not provide this configuration screen/i,
+      /restart Claude Desktop or start a new Desktop Local session/i,
+    ],
+    "setup command Desktop reload guidance",
+  );
+  assertMatchesAll(
+    primarySkill,
+    [
+      /Claude Desktop itself does not provide this configuration screen/i,
+      /restart Claude Desktop or start a new Desktop Local session/i,
+    ],
+    "primary Skill Desktop reload guidance",
+  );
+  assertMatchesAll(
+    english,
+    [
+      /Claude Desktop itself does not provide this configuration screen/i,
+      /restart Claude Desktop or start a new Desktop Local session/i,
+    ],
+    "README.md Desktop reload guidance",
+  );
+  assertMatchesAll(
+    chinese,
+    [
+      /Claude Desktop 本身不提供此配置界面/i,
+      /重启 Claude Desktop 或新建 Desktop Local 会话/i,
+    ],
+    "README.zh-CN.md Desktop reload guidance",
+  );
+});
+
+test("internal design docs record the supported configuration surface", async () => {
+  const [design, implementationPlan] = await Promise.all([
+    text("docs/superpowers/specs/2026-08-17-gpt-image-2-plugin-design.md"),
+    text("docs/superpowers/plans/2026-08-17-gpt-image-2-plugin.md"),
+  ]);
+
+  for (const [label, source] of [
+    ["design", design],
+    ["implementation plan", implementationPlan],
+  ] as const) {
+    assertIncludesAll(
+      source,
+      ["`/plugin`", "Installed", "`gpt-image-2`", "Configure options"],
+      `${label} configuration path`,
+    );
+    assertMatchesAll(
+      source,
+      [
+        /Claude Desktop itself does not provide this configuration screen/i,
+        /restart Claude Desktop or start a new Desktop Local session/i,
+      ],
+      `${label} Desktop reload guidance`,
+    );
+    assert.doesNotMatch(
+      source,
+      /(?:GUI[^\r\n]{0,100}(?:configuration|API key|Base URL)|(?:configuration|API key|Base URL)[^\r\n]{0,100}GUI)/i,
+      `${label} must not specify an unsupported configuration GUI`,
+    );
+  }
 });
 
 test("English README documents supported GUI installation, runtime, safety, and limits", async () => {
@@ -249,7 +343,7 @@ test("English README documents supported GUI installation, runtime, safety, and 
     source,
     [
       /GUI.{0,120}(?:install|Plugins)|(?:install|Plugins).{0,120}GUI/is,
-      /plugin settings.{0,120}API key/is,
+      /Configure options.{0,160}API key/is,
       /custom Base URL.{0,240}(?:receives|receive).{0,80}(?:API key|key).{0,120}prompts?.{0,120}edit images/is,
       /custom.{0,100}\/v1.{0,180}(?:not|no).{0,80}(?:append|added)/is,
       /HTTP.{0,220}API key.{0,100}prompts?.{0,100}edit images.{0,100}without transport encryption/is,
@@ -269,7 +363,7 @@ test("English README documents supported GUI installation, runtime, safety, and 
       /same-authority.{0,160}outside.{0,80}(?:boundary|threat)/is,
       /native Win32 handle.{0,80}required/is,
       /get_status.{0,180}(?:no|zero).{0,80}(?:provider|image API)/is,
-      /invalid configured Base URL.{0,100}prevents.{0,60}(?:server )?startup.{0,160}plugin settings/is,
+      /invalid configured Base URL.{0,100}prevents.{0,60}(?:server )?startup.{0,200}Configure options/is,
       /no live provider verification/i,
       /validation command.{0,100}disables.{0,80}lifecycle hooks/is,
       /test:host.{0,260}isolated Claude configuration.{0,800}(?:does not|doesn't).{0,80}(?:run a Claude model|image tool).{0,120}(?:image provider|provider)/is,
@@ -335,7 +429,7 @@ test("Chinese README documents the same supported surface and exact key rule", a
     source,
     [
       /GUI.{0,120}(?:安装|插件)|(?:安装|插件).{0,120}GUI/is,
-      /插件设置.{0,120}API Key/is,
+      /Configure options.{0,160}API Key/is,
       /自定义 Base URL.{0,260}(?:接收|收到).{0,100}(?:API Key|密钥).{0,140}(?:prompt|提示词).{0,140}(?:编辑图像|编辑输入图像)/is,
       /自定义.{0,100}\/v1.{0,180}(?:不会|不).{0,80}(?:自动追加|自动补)/is,
       /HTTP.{0,220}API Key.{0,100}prompt.{0,140}编辑输入图像/is,
@@ -353,7 +447,7 @@ test("Chinese README documents the same supported surface and exact key rule", a
       /同等权限.{0,180}威胁边界之外/is,
       /原生 Win32 句柄.{0,100}(?:才可|需要)/is,
       /get_status.{0,180}(?:不会|零).{0,100}(?:服务商|图像 API)/is,
-      /无效.{0,60}Base URL.{0,100}阻止.{0,80}(?:server|服务器).{0,60}启动.{0,160}插件设置/is,
+      /无效.{0,60}Base URL.{0,100}阻止.{0,80}(?:server|服务器).{0,60}启动.{0,200}Configure options/is,
       /未进行.{0,80}实时服务商验证/is,
       /验证命令.{0,100}禁用.{0,100}lifecycle hooks/is,
       /test:host.{0,260}隔离 Claude 配置.{0,320}不运行 Claude 模型.{0,120}不调用图片工具.{0,120}不联系图片服务商/is,

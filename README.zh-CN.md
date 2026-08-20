@@ -16,7 +16,7 @@ GUI 插件安装是首选方式：
 2. 打开 GUI 的 **设置 → 插件** 页面；不同 Claude 版本的标签可能略有差异。
 3. 将本仓库根目录添加为本地 marketplace，或选择对应仓库来源，然后安装 `gpt-image-2@kpk-plugins`。
 4. 为当前项目启用该插件。插件启用是项目级的；安装后不会自动授权所有项目。
-5. 打开插件设置完成配置。不要把 `.mcp.json` 复制到普通 settings。
+5. 按下文说明，在交互式 Claude Code TUI 中完成配置。不要把 `.mcp.json` 复制到普通 settings。
 
 仓库根目录就是 marketplace 根目录，其中的插件来源为 `./`。
 
@@ -42,9 +42,18 @@ claude plugin install gpt-image-2@kpk-plugins --scope user
 
 只有从源码构建和测试的开发者才需要 npm 与开发依赖。
 
-## 在 GUI 中配置
+## 在 Claude Code TUI 中配置
 
-请在插件设置的敏感 **OpenAI API Key** 字段中填写密钥。Manifest 允许该字段暂时留空，使 MCP server 仍可启动并暴露 `tools/list` 和非付费的 `get_status` 工具；生成和编辑仍然需要密钥。能够通过输入验证并进入图片工具执行的有效请求，会在任何服务商请求之前返回 `CONFIG_MISSING`。
+Claude Desktop 本身不提供此配置界面。请在交互式 Claude Code 终端中：
+
+1. 运行 `/plugin`。
+2. 打开 `Installed`。
+3. 选择 `gpt-image-2`。
+4. 选择 `Configure options`。
+
+在 `Configure options` 中，将密钥填入敏感的 **OpenAI API Key** 字段。Manifest 允许该字段暂时留空，使 MCP server 仍可启动并暴露 `tools/list` 和非付费的 `get_status` 工具；生成和编辑仍然需要密钥。能够通过输入验证并进入图片工具执行的有效请求，会在任何服务商请求之前返回 `CONFIG_MISSING`。
+
+保存设置后，重启 Claude Desktop 或新建 Desktop Local 会话，使 MCP 进程加载新配置。
 
 用户 API Key 不能被打印、读取、写入仓库、命令行、.env、.mcp.json、普通 settings、README、prompt 或日志。
 
@@ -70,7 +79,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ### `get_status`
 
-只返回安全状态：API Key 是否已配置、是否配置了自定义 Base URL、运行中 server 的活动 URL 所对应的 `base_url_valid: true`、已批准工作区根目录、模型、server 版本和默认相对输出目录。无效的已配置 Base URL 会阻止 server 启动；请在插件设置中修正后重新加载或重启插件。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
+只返回安全状态：API Key 是否已配置、是否配置了自定义 Base URL、运行中 server 的活动 URL 所对应的 `base_url_valid: true`、已批准工作区根目录、模型、server 版本和默认相对输出目录。无效的已配置 Base URL 会阻止 server 启动；请通过 Claude Code TUI 的 `Configure options` 修正，然后重启 Claude Desktop 或新建 Desktop Local 会话。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
 
 ### `generate_image`
 
@@ -129,11 +138,11 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ## 故障排查
 
-- **API Key 未配置：** 打开 Claude Desktop Code 的插件设置，填写敏感 API Key 字段；不要把密钥粘贴到 chat 或 shell。
-- **自定义 Base URL 无效或未生效：** 无效的已配置 Base URL 会阻止 server 启动。请在插件设置中修正并确认已保存，然后重新加载或重启插件。自定义端点通常应以 `/v1` 结尾，插件不会自动补全 `/v1`。
+- **API Key 未配置：** 按上文 Claude Code TUI 路径，在 `Configure options` 中填写敏感 API Key 字段；不要把密钥粘贴到 chat 或 shell。
+- **自定义 Base URL 无效或未生效：** 无效的已配置 Base URL 会阻止 server 启动。请在 `Configure options` 中修正并确认已保存，然后重启 Claude Desktop 或新建 Desktop Local 会话。自定义端点通常应以 `/v1` 结尾，插件不会自动补全 `/v1`。
 - **服务商账户资格：** 使用 GPT Image 2 前，请在服务商账户中完成任何必需的组织验证；插件无法绕过服务商资格控制。
 - **服务商限流：** 速率限制响应会作为失败的付费调用返回，且不会自动重试。等待服务商容量或账户限额恢复后，再有意识地发起新请求。
-- **MCP 启动失败：** 确认 Claude Desktop Code 可见的 PATH 中有 Node.js 20+、插件已为当前项目启用，并且 Base URL 有效。修正设置后重新加载或重启插件。
+- **MCP 启动失败：** 确认 Claude Desktop Code 可见的 PATH 中有 Node.js 20+、插件已为当前项目启用，并且 Base URL 有效。修正配置后，重启 Claude Desktop 或新建 Desktop Local 会话。
 - **没有已批准工作区根目录：** 在 Claude Desktop Code 中打开项目，并为该项目启用插件。
 - **`OUTPUT_EXISTS`：** 更换相对输出路径；插件禁止覆盖。
 - **`SIZE_MISMATCH`：** 使用返回的实际宽高；已保存图像仍然有效。

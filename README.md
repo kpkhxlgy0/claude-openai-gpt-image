@@ -16,7 +16,7 @@ GUI plugin installation is the primary path:
 2. Open the GUI **Settings → Plugins** area. Labels may vary slightly by Claude release.
 3. Add this repository root as a local marketplace or select its repository source, then install `gpt-image-2@kpk-plugins`.
 4. Enable the installed plugin for the current project. Enablement is project-specific; installing it does not grant access to every project automatically.
-5. Open the plugin settings for configuration. Do not copy `.mcp.json` into ordinary settings.
+5. Complete configuration from an interactive Claude Code TUI as described below. Do not copy `.mcp.json` into ordinary settings.
 
 The plugin root is the marketplace root, and the marketplace entry points to `./`.
 
@@ -42,9 +42,18 @@ The committed marketplace copy includes the standalone bundle. An installed-copy
 
 npm and development dependencies are needed only by contributors building or testing the source checkout.
 
-## Configure in the GUI
+## Configure in the Claude Code TUI
 
-In plugin settings, enter the API key in the sensitive **OpenAI API key** field. The manifest allows this field to remain empty so the MCP server can start and expose `tools/list` and the non-paid `get_status` tool. Generation and editing still require the key. A valid image request that passes input validation and reaches image-tool execution returns `CONFIG_MISSING` before any provider request when the key is absent. Do not put the key in a command line, `.env`, `.mcp.json`, ordinary settings, a README, a prompt, or a log, and do not ask Claude to display or inspect it.
+Claude Desktop itself does not provide this configuration screen. From an interactive Claude Code terminal:
+
+1. Run `/plugin`.
+2. Open `Installed`.
+3. Select `gpt-image-2`.
+4. Choose `Configure options`.
+
+In `Configure options`, enter the API key in the sensitive **OpenAI API key** field. The manifest allows this field to remain empty so the MCP server can start and expose `tools/list` and the non-paid `get_status` tool. Generation and editing still require the key. A valid image request that passes input validation and reaches image-tool execution returns `CONFIG_MISSING` before any provider request when the key is absent. Do not put the key in a command line, `.env`, `.mcp.json`, ordinary settings, a README, a prompt, or a log, and do not ask Claude to display or inspect it.
+
+After saving a setting, restart Claude Desktop or start a new Desktop Local session so the MCP process loads the new configuration.
 
 The default official Base URL is:
 
@@ -68,7 +77,7 @@ Run `/gpt-image-2:setup` after installation. The command calls only `get_status`
 
 ### `get_status`
 
-Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, model, server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it in plugin settings and reload or restart the plugin. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
+Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, model, server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it through `Configure options` in the Claude Code TUI, then restart Claude Desktop or start a new Desktop Local session. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
 
 ### `generate_image`
 
@@ -127,11 +136,11 @@ On Windows under Node 20, existing reparse-point/Junction escapes are rejected, 
 
 ## Troubleshooting
 
-- **API key not configured:** open Claude Desktop Code plugin settings and populate the sensitive API-key field. Do not paste the key into chat or a shell.
-- **Invalid or unused custom Base URL:** an invalid configured Base URL prevents the server from starting. Correct it in plugin settings, confirm the setting was saved, then reload or restart the plugin. Custom endpoints should usually end in `/v1`; no `/v1` segment is added automatically.
+- **API key not configured:** follow the Claude Code TUI path above and populate the sensitive API-key field in `Configure options`. Do not paste the key into chat or a shell.
+- **Invalid or unused custom Base URL:** an invalid configured Base URL prevents the server from starting. Correct it in `Configure options`, confirm the setting was saved, then restart Claude Desktop or start a new Desktop Local session. Custom endpoints should usually end in `/v1`; no `/v1` segment is added automatically.
 - **Provider account eligibility:** complete any required organization verification in the provider account before using GPT Image 2. The plugin cannot bypass provider eligibility controls.
 - **Provider throttling:** a rate limit response is returned as a failed paid call and is not retried automatically. Wait for provider capacity or account limits to recover before making a new deliberate request.
-- **MCP startup failure:** confirm Node.js 20+ is on the PATH visible to Claude Desktop Code, the plugin is enabled for the project, and the configured Base URL is valid. Reload or restart the plugin after correcting settings.
+- **MCP startup failure:** confirm Node.js 20+ is on the PATH visible to Claude Desktop Code, the plugin is enabled for the project, and the configured Base URL is valid. After correcting configuration, restart Claude Desktop or start a new Desktop Local session.
 - **No approved workspace root:** open the project in Claude Desktop Code and enable the plugin for that project.
 - **`OUTPUT_EXISTS`:** choose a new relative output path. The plugin will not overwrite.
 - **`SIZE_MISMATCH`:** use the returned actual width and height; the saved image is valid.

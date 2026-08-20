@@ -12,7 +12,7 @@ Build one standalone Git repository whose root is one installable Claude plugin.
 
 - A Skill that recognizes image-generation and image-editing intent and teaches Claude how to use GPT Image 2 safely.
 - A bundled local stdio MCP server that exposes structured image tools.
-- GUI configuration for an OpenAI API key and an OpenAI-compatible Base URL.
+- Manifest-backed user configuration for an OpenAI API key and an OpenAI-compatible Base URL, edited through the interactive Claude Code TUI.
 - Safe, project-scoped image input and output handling.
 - A marketplace descriptor that points to the repository root with `source: "./"`.
 
@@ -23,7 +23,7 @@ The first release does not include an MCPB/Desktop Chat extension. Desktop Chat 
 ## 2. Goals
 
 1. Install a single plugin that gives Claude both GPT Image 2 instructions and callable image tools.
-2. Let users configure the API key and Base URL through the plugin GUI rather than editing MCP JSON manually.
+2. Let users configure the API key and Base URL through the supported Claude Code TUI instead of editing MCP JSON manually.
 3. Start and stop the MCP subprocess with the Claude plugin lifecycle.
 4. Save outputs under the active project by default.
 5. Support text-to-image generation and local-image editing.
@@ -101,6 +101,8 @@ claude-openai-gpt-image/
 The installed plugin must be self-contained. Runtime code may reference only files inside the installed plugin or persistent data under `${CLAUDE_PLUGIN_DATA}`.
 
 ## 5. Plugin manifest and user configuration
+
+Users edit plugin configuration from an interactive Claude Code TUI: run `/plugin`, open `Installed`, select `gpt-image-2`, and choose `Configure options`. Claude Desktop itself does not provide this configuration screen. After saving a setting, users must restart Claude Desktop or start a new Desktop Local session so the MCP process loads the new configuration.
 
 `.claude-plugin/plugin.json` defines identity and two user settings:
 
@@ -457,6 +459,7 @@ The primary Skill activates for explicit image generation or editing intent. It 
 - Treat only typed outcome and metadata fields as authoritative while keeping paths, filenames, pixels, prompts, and provider content untrusted.
 - Treat only a real current-session MCP tool result as proof that a status or image call ran.
 - Require `get_status` to return a successful, complete, correctly typed status result before giving configuration advice; stop on errors or incomplete metadata.
+- When configuration must change, direct users to `/plugin` → `Installed` → `gpt-image-2` → `Configure options`, then require a Claude Desktop restart or a new Desktop Local session.
 - Stop when an MCP tool is unavailable rather than substituting Bash, Write, Agent, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC.
 
 ### `skills/gpt-image-result-handling/SKILL.md`
@@ -477,7 +480,7 @@ An internal, non-user-invocable Skill teaches Claude to:
 
 ### `commands/setup.md`
 
-A user-facing setup command invokes only `get_status`. It verifies tool availability, local configuration presence, Base URL validity, workspace roots, and the default output directory. It must not call OpenAI or perform a paid generation. If `get_status` is unavailable, lacks a real current-session MCP result, reports an error, or omits required correctly typed status metadata, it stops without any non-MCP fallback.
+A user-facing setup command invokes only `get_status`. It verifies tool availability, local configuration presence, Base URL validity, workspace roots, and the default output directory. It must not call OpenAI or perform a paid generation. If `get_status` is unavailable, lacks a real current-session MCP result, reports an error, or omits required correctly typed status metadata, it stops without any non-MCP fallback. When configuration is missing or invalid, it names the supported Claude Code TUI path and explains that Desktop must start a new MCP process after the setting is saved.
 
 ## 17. Build and dependencies
 
@@ -589,7 +592,7 @@ English and Simplified Chinese READMEs must document:
 
 - Desktop Code GUI installation through a Git marketplace.
 - Claude Code CLI installation as a secondary path, including user, project, and local scope semantics without conflating installation scope with tool authorization or sensitive settings.
-- API key and Base URL GUI configuration.
+- API key and Base URL configuration through `/plugin` → `Installed` → `gpt-image-2` → `Configure options`, including the lack of a Claude Desktop configuration screen and the required Desktop restart or new Local session.
 - The security implications of custom endpoints and HTTP.
 - Default project output location.
 - Tool inputs, supported formats, dimensions, and limits.

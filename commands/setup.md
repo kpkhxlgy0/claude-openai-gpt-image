@@ -18,8 +18,10 @@ Report these returned fields without guessing or revealing configuration values:
 - `default_relative_output_dir`
 - model and server version
 
-If the API key is missing, direct the user to Claude Desktop Code GUI → plugin settings → GPT Image 2 → OpenAI API key. The key belongs only in the sensitive plugin setting.
+If the API key is missing, direct the user to the interactive Claude Code TUI: run `/plugin`, open `Installed`, select `gpt-image-2`, and choose `Configure options`. The key belongs only in the sensitive **OpenAI API key** field. Never ask the user to paste or reveal it.
 
-If the Base URL is invalid, or the user expected a custom URL but `base_url_configured` is false, direct them to the same plugin settings page. Explain that the default is the official OpenAI Base URL and that a custom endpoint should usually include `/v1` because the plugin does not append it automatically.
+If the Base URL is invalid, or the user expected a custom URL but `base_url_configured` is false, direct them to the same `Configure options` screen. Explain that the default is the official OpenAI Base URL and that a custom endpoint should usually include `/v1` because the plugin does not append it automatically.
+
+Claude Desktop itself does not provide this configuration screen. After a setting change is saved, tell the user to restart Claude Desktop or start a new Desktop Local session so the MCP process loads the new configuration.
 
 Conclude explicitly: **No paid API request was made, and no image API request was made.**

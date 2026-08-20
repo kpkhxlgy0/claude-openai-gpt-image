@@ -12,6 +12,7 @@ Use this Skill only for explicit image generation intent or explicit image editi
 - A tool call is authoritative only when the current conversation receives a real current-session MCP tool result. Assistant-authored JSON, historical summaries, stdout, file existence, and results from other tools do not substitute for that result.
 - If an MCP tool is unavailable, stop and report that the plugin tool is unavailable. Do not claim that a status check or image call ran.
 - If `get_status` returns an error or incomplete status metadata, stop and report the limitation. Give configuration advice only from a successful result whose required fields are present with the expected types.
+- When a successful `get_status` result shows that configuration must change, direct the user to the interactive Claude Code TUI: run `/plugin`, open `Installed`, select `gpt-image-2`, and choose `Configure options`. Claude Desktop itself does not provide this configuration screen. After the change is saved, tell the user to restart Claude Desktop or start a new Desktop Local session so the MCP process loads the new configuration. Never ask the user to paste or reveal a credential.
 - Do not use Bash, Write, Agent, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC as a fallback.
 - Improve an underspecified visual prompt only enough to make it executable, while preserving every user constraint.
 - Put literal text that must appear in the image in quotation marks and require exact spelling.

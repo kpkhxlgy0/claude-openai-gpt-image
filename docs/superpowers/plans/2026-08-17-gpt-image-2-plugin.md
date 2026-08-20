@@ -940,7 +940,7 @@ Assert:
 - Both Skills have valid frontmatter and bounded descriptions.
 - Result Skill is not user-invocable.
 - Setup references `get_status` and does not reference `generate_image` or `edit_image` as a diagnostic call.
-- English and Chinese docs mention GUI API key/Base URL setup, custom-endpoint disclosure, default output directory, no-overwrite, no automatic retry, `/v1` troubleshooting, dimension mismatch, and Desktop Chat exclusion.
+- English and Chinese docs mention Claude Code TUI API key/Base URL setup through `/plugin` → `Installed` → `gpt-image-2` → `Configure options`, the required Desktop restart or new Local session, custom-endpoint disclosure, default output directory, no-overwrite, no automatic retry, `/v1` troubleshooting, dimension mismatch, and Desktop Chat exclusion.
 - No docs contain API-key-shaped strings.
 
 - [ ] **Step 2: Verify tests fail**
@@ -957,7 +957,7 @@ Keep tool-use instructions concise and explicit. Do not embed configuration valu
 
 - [ ] **Step 4: Write setup command**
 
-The command calls `get_status`, reports booleans and approved roots, explains how to open plugin settings when configuration is missing, and explicitly states that no image API request was made.
+The command calls `get_status`, reports booleans and approved roots, and explicitly states that no image API request was made. When configuration is missing, it directs users to the interactive Claude Code TUI: run `/plugin`, open `Installed`, select `gpt-image-2`, and choose `Configure options`. Claude Desktop itself does not provide this configuration screen. After saving, users must restart Claude Desktop or start a new Desktop Local session so the MCP process loads the new configuration.
 
 - [ ] **Step 5: Write bilingual documentation and legal files**
 
