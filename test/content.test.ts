@@ -129,12 +129,67 @@ test("primary Skill routes explicit image intent safely and accounts for cost", 
       "After a successful paid call, stop and report the result.",
       "A changed prompt, input image, mask, or output path requires new explicit authorization.",
       "For iterative editing, pass the previous successfully saved output as an edit input; do not assume a server-side edit session.",
-      "Transparent output is unsupported by GPT Image 2.",
+      'Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `output_format` `png` or `webp`.',
+      "The default model `gpt-image-2` rejects transparent requests.",
+      "Never switch away from the default model `gpt-image-2`, or to a different model, without the user's explicit agreement; cost and output differ by model.",
+      "Resolve material ambiguity about the prompt, inputs, model, background, format, size, and destination before calling a paid tool",
       "If a successful result reports `SIZE_MISMATCH`, preserve the saved result but clearly report both requested and actual dimensions.",
     ],
     "primary Skill",
   );
+  assert.doesNotMatch(source, /Transparent output is unsupported/i);
   assert.doesNotMatch(source, /mcp__[^\s`]+/i);
+});
+
+test("primary Skill and both READMEs list every selectable model", async () => {
+  const [primarySkill, english, chinese] = await Promise.all([
+    text("skills/gpt-image-2/SKILL.md"),
+    text("README.md"),
+    text("README.zh-CN.md"),
+  ]);
+  for (const [label, source] of [
+    ["primary Skill", primarySkill],
+    ["README.md", english],
+    ["README.zh-CN.md", chinese],
+  ] as const) {
+    assertIncludesAll(
+      source,
+      ["`gpt-image-2`", "`gpt-image-2.5-sunburst`", "`gpt-image-2.5-flare`"],
+      `${label} model list`,
+    );
+  }
+  for (const [label, source] of [
+    ["README.md", english],
+    ["README.zh-CN.md", chinese],
+  ] as const) {
+    assertIncludesAll(
+      source,
+      ["`model`", "`background`", "`auto`", "`opaque`", "`transparent`"],
+      `${label} model and background parameters`,
+    );
+  }
+  assertIncludesAll(
+    english,
+    [
+      "- `model`: `gpt-image-2` (default), `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare`",
+      "- `background`: `auto` (default), `opaque`, or `transparent`",
+      "`edit_image` accepts the same `model` and `background` inputs as `generate_image`.",
+      "the default output directory stays `.claude/generated-images/gpt-image-2` for every model.",
+    ],
+    "README.md model and background parameters",
+  );
+  assertIncludesAll(
+    chinese,
+    [
+      "- `model`：`gpt-image-2`（默认）、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`",
+      "- `background`：`auto`（默认）、`opaque` 或 `transparent`",
+      "`edit_image` 接受与 `generate_image` 相同的 `model` 和 `background` 参数。",
+      "无论选择哪个模型，默认输出目录都保持为 `.claude/generated-images/gpt-image-2`。",
+    ],
+    "README.zh-CN.md model and background parameters",
+  );
+  assert.doesNotMatch(english, /Transparent output backgrounds are not supported/);
+  assert.doesNotMatch(chinese, /透明输出背景不受支持/);
 });
 
 test("internal result Skill preserves returned image facts and warnings", async () => {
@@ -320,7 +375,9 @@ test("English README documents supported GUI installation, runtime, safety, and 
       "No private snapshot path is returned, and the warning does not authorize a retry or another paid call.",
       "1536x1024",
       "1024x1536",
-      "Transparent output backgrounds are not supported.",
+      'Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `png` or `webp` output.',
+      "The API marks transparent-background support for `gpt-image-2` as preview, so the plugin rejects transparent requests for `gpt-image-2` locally with `INVALID_INPUT` before any paid call.",
+      "Mask alpha only identifies the edit region; it does not request a transparent output background.",
       "organization verification",
       "rate limit",
       "MCP startup",
@@ -399,7 +456,9 @@ test("Chinese README documents the same supported surface and exact key rule", a
       "不会返回任何私有快照路径，该警告也不授权重试或再次付费调用。",
       "1536x1024",
       "1024x1536",
-      "透明输出背景不受支持。",
+      '透明输出需要 `background: "transparent"`、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare` 模型，以及 `png` 或 `webp` 输出格式。',
+      "API 将 `gpt-image-2` 的透明背景支持标记为预览，因此插件会在任何付费调用之前于本地以 `INVALID_INPUT` 拒绝 `gpt-image-2` 的透明请求。",
+      "蒙版 alpha 只用于标识编辑区域，并不请求透明输出背景。",
       "组织验证",
       "速率限制",
       "MCP 启动",

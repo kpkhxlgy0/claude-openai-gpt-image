@@ -218,6 +218,8 @@ test("initialize without an API key exposes exactly three correctly annotated to
       const generateInput = asRecord(generate.inputSchema);
       const generateProperties = asRecord(generateInput.properties);
       assert.deepEqual(Object.keys(generateProperties).sort(), [
+        "background",
+        "model",
         "moderation",
         "output_compression",
         "output_format",
@@ -233,8 +235,10 @@ test("initialize without an API key exposes exactly three correctly annotated to
       const editInput = asRecord(edit.inputSchema);
       const editProperties = asRecord(editInput.properties);
       assert.deepEqual(Object.keys(editProperties).sort(), [
+        "background",
         "image_paths",
         "mask_path",
+        "model",
         "output_compression",
         "output_format",
         "output_path",
@@ -245,6 +249,23 @@ test("initialize without an API key exposes exactly three correctly annotated to
       ]);
       assert.deepEqual(editInput.required, ["prompt", "image_paths"]);
       assert.equal(editInput.additionalProperties, false);
+
+      for (const properties of [generateProperties, editProperties]) {
+        const model = asRecord(properties.model);
+        assert.deepEqual(asArray(model.enum), [
+          "gpt-image-2",
+          "gpt-image-2.5-sunburst",
+          "gpt-image-2.5-flare",
+        ]);
+        assert.equal(model.default, "gpt-image-2");
+        const background = asRecord(properties.background);
+        assert.deepEqual(asArray(background.enum), [
+          "auto",
+          "opaque",
+          "transparent",
+        ]);
+        assert.equal(background.default, "auto");
+      }
 
       const statusOutputSchema = JSON.stringify(status.outputSchema);
       assert.match(statusOutputSchema, /api_key_configured/);
@@ -288,6 +309,10 @@ test("initialize without an API key exposes exactly three correctly annotated to
           .map(asRecord)
           .find((branch) => "model" in asRecord(branch.properties));
         assert.ok(success);
+        assert.deepEqual(
+          asArray(asRecord(asRecord(success.properties).model).enum),
+          ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
+        );
         const warningSchema = asRecord(
           asRecord(asRecord(success.properties).warnings).items,
         );
@@ -315,6 +340,14 @@ test("initialize without an API key exposes exactly three correctly annotated to
         default_relative_output_dir: ".claude/generated-images/gpt-image-2",
         server_version: "0.1.0-test",
       });
+      const statusSuccess = asArray(asRecord(status.outputSchema).oneOf)
+        .map(asRecord)
+        .find((branch) => "model" in asRecord(branch.properties));
+      assert.ok(statusSuccess);
+      assert.equal(
+        asRecord(asRecord(statusSuccess.properties).model).const,
+        "gpt-image-2",
+      );
     } finally {
       await protocol.close();
     }
@@ -358,6 +391,60 @@ test("invalid inputs and missing configuration return stable sanitized structure
         message:
           "INVALID_INPUT: output_compression is not supported for PNG except the ignored zero default",
       });
+
+      for (const [toolName, extraArguments] of [
+        ["generate_image", {}],
+        ["edit_image", { image_paths: ["input.png"] }],
+      ] as const) {
+        const transparentDefaultModel = await protocol.client.callTool({
+          name: toolName,
+          arguments: {
+            prompt: "valid prompt",
+            background: "transparent",
+            ...extraArguments,
+          },
+        });
+        assert.equal(transparentDefaultModel.isError, true);
+        assert.deepEqual(transparentDefaultModel.structuredContent, {
+          isError: true,
+          code: "INVALID_INPUT",
+          message:
+            'INVALID_INPUT: background "transparent" requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare',
+        });
+
+        const transparentJpeg = await protocol.client.callTool({
+          name: toolName,
+          arguments: {
+            prompt: "valid prompt",
+            model: "gpt-image-2.5-sunburst",
+            background: "transparent",
+            output_format: "jpeg",
+            ...extraArguments,
+          },
+        });
+        assert.equal(transparentJpeg.isError, true);
+        assert.deepEqual(transparentJpeg.structuredContent, {
+          isError: true,
+          code: "INVALID_INPUT",
+          message:
+            'INVALID_INPUT: background "transparent" requires output_format "png" or "webp"',
+        });
+
+        const unknownModel = await protocol.client.callTool({
+          name: toolName,
+          arguments: {
+            prompt: "valid prompt",
+            model: "gpt-image-1",
+            ...extraArguments,
+          },
+        });
+        assert.equal(unknownModel.isError, true);
+        assert.deepEqual(unknownModel.structuredContent, {
+          isError: true,
+          code: "INVALID_INPUT",
+          message: "INVALID_INPUT: Image tool input is invalid",
+        });
+      }
 
       for (const argumentsValue of [
         {},

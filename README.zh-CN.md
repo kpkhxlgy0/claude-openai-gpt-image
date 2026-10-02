@@ -79,25 +79,33 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ### `get_status`
 
-只返回安全状态：API Key 是否已配置、是否配置了自定义 Base URL、运行中 server 的活动 URL 所对应的 `base_url_valid: true`、已批准工作区根目录、模型、server 版本和默认相对输出目录。无效的已配置 Base URL 会阻止 server 启动；请通过 Claude Code TUI 的 `Configure options` 修正，然后重启 Claude Desktop 或新建 Desktop Local 会话。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
+只返回安全状态：API Key 是否已配置、是否配置了自定义 Base URL、运行中 server 的活动 URL 所对应的 `base_url_valid: true`、已批准工作区根目录、默认模型（`gpt-image-2`）、server 版本和默认相对输出目录。无效的已配置 Base URL 会阻止 server 启动；请通过 Claude Code TUI 的 `Configure options` 修正，然后重启 Claude Desktop 或新建 Desktop Local 会话。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
 
 ### `generate_image`
 
-使用固定模型 `gpt-image-2` 和固定 `n: 1` 生成一张图像，并保存为一个新文件。主要参数包括：
+使用所选 `model`（默认 `gpt-image-2`；也可选择 `gpt-image-2.5-sunburst` 和 `gpt-image-2.5-flare`）和固定 `n: 1` 生成一张图像，并保存为一个新文件。主要参数包括：
 
 - `prompt`
+- `model`：`gpt-image-2`（默认）、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`
 - `quality`：`auto`、`low`、`medium`、`high`
 - `size`
 - `output_format`：`png`、`jpeg`、`webp`
 - JPEG/WebP 可选 `output_compression`：0 到 100
+- `background`：`auto`（默认）、`opaque` 或 `transparent`
 - `moderation`：`auto` 或 `low`
 - 可选相对 `output_path` 和已批准 `workspace_root`
 
 ### `edit_image`
 
-按给定顺序接收 1–8 张编辑输入图像，并保存一张新图像。输入支持 PNG、JPEG 和 WebP。每个输入最多 50 MiB；所有编辑图像与可选蒙版合计最多 200 MiB。
+按给定顺序接收 1–8 张编辑输入图像，并保存一张新图像。输入支持 PNG、JPEG 和 WebP。每个输入最多 50 MiB；所有编辑图像与可选蒙版合计最多 200 MiB。`edit_image` 接受与 `generate_image` 相同的 `model` 和 `background` 参数。
 
-可选蒙版必须是 PNG，必须包含 alpha 通道，尺寸必须匹配第一张输入图像，并且小于 4 MiB。透明输出背景不受支持。蒙版 alpha 只用于标识编辑区域。
+可选蒙版必须是 PNG，必须包含 alpha 通道，尺寸必须匹配第一张输入图像，并且小于 4 MiB。蒙版 alpha 只用于标识编辑区域，并不请求透明输出背景。
+
+### 模型与背景
+
+默认模型是 `gpt-image-2`。结果会报告实际使用的模型；无论选择哪个模型，默认输出目录都保持为 `.claude/generated-images/gpt-image-2`。不同模型的费用和输出可能不同。
+
+透明输出需要 `background: "transparent"`、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare` 模型，以及 `png` 或 `webp` 输出格式。API 将 `gpt-image-2` 的透明背景支持标记为预览，因此插件会在任何付费调用之前于本地以 `INVALID_INPUT` 拒绝 `gpt-image-2` 的透明请求。使用 `jpeg` 输出的透明请求也会以同样方式被拒绝。默认的 `background: "auto"` 不会向服务商发送 background 字段。
 
 ## 格式、尺寸与输出
 
@@ -105,7 +113,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 - 预设尺寸包括 `1024x1024`、横向 `1536x1024` 和纵向 `1024x1536`。工具默认尺寸是 `1024x1024`，也接受 `auto`。
 - 自定义 `WIDTHxHEIGHT` 的宽高必须是 16 的倍数；单边最大 3840 像素；宽高比必须在 1:3 到 3:1 之间；总像素必须在 655,360 到 8,294,400 之间。
 - PNG 不使用输出压缩；JPEG 和 WebP 接受 0 到 100 的压缩值。
-- 未提供 `output_path` 时，文件保存在 `.claude/generated-images/gpt-image-2` 下，并使用不含 prompt 的唯一文件名。
+- 未提供 `output_path` 时，无论选择哪个模型，文件都保存在 `.claude/generated-images/gpt-image-2` 下，并使用不含 prompt 的唯一文件名。
 - 显式输出路径会被保留，但必须是已批准工作区根目录内的相对路径，并使用与请求格式一致的扩展名。
 - 现有目标会被拒绝；无覆盖发布也会阻止并发调用替换同一目标。
 
@@ -119,7 +127,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ## 费用、并发与重试
 
-生成和编辑是付费服务商操作。每个请求固定只输出一张图像，每个 server 进程同一时间只允许一个付费调用。SDK 和应用程序都不重试，因此失败的付费调用不会自动再次执行。调用图像工具前，应确认 prompt、编辑输入、尺寸、格式和输出路径。
+生成和编辑是付费服务商操作。每个请求固定只输出一张图像，每个 server 进程同一时间只允许一个付费调用。SDK 和应用程序都不重试，因此失败的付费调用不会自动再次执行。调用图像工具前，应确认 prompt、编辑输入、模型、背景、尺寸、格式和输出路径。
 
 ## 工作区与安全边界
 

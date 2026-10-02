@@ -146,11 +146,13 @@ function createClient(
 }
 
 const generateRequest: ProviderGenerateRequest = Object.freeze({
+  model: "gpt-image-2",
   prompt: "draw a lighthouse",
   quality: "high",
   size: "1536x1024",
   output_format: "jpeg",
   output_compression: 37,
+  background: "auto",
   moderation: "low",
 });
 
@@ -279,11 +281,71 @@ test("generate maps validated fields and extracts one Base64 image, usage, and r
       moderation: "low",
     },
   ]);
+  assert.equal("background" in state.generateBodies[0]!, false);
   assert.deepEqual(result, {
     base64: "Z2VuZXJhdGVkLWltYWdl",
     requestId: "req_generate-123.safe",
     usage,
   });
+});
+
+test("generate and edit pass the selected model and send only a non-auto background", async () => {
+  const { client, state } = createClient();
+
+  await client.generate({
+    ...generateRequest,
+    model: "gpt-image-2.5-sunburst",
+    output_format: "png",
+    background: "transparent",
+  });
+  await client.generate({
+    ...generateRequest,
+    model: "gpt-image-2.5-flare",
+    background: "opaque",
+  });
+  await client.generate({ ...generateRequest, background: "opaque" });
+  await withSnapshotFixture(async ({ first }) => {
+    const editRequest: ProviderEditRequest = {
+      model: "gpt-image-2.5-flare",
+      prompt: "edit with a selected model",
+      quality: "auto",
+      size: "1024x1024",
+      output_format: "webp",
+      background: "transparent",
+      images: Object.freeze([first]),
+    };
+    await client.edit(editRequest);
+    await client.edit({
+      ...editRequest,
+      model: "gpt-image-2.5-sunburst",
+      background: "opaque",
+    });
+    await client.edit({
+      ...editRequest,
+      model: "gpt-image-2",
+      background: "auto",
+    });
+  });
+
+  assert.deepEqual(
+    state.generateBodies.map((body) => [body.model, body.background]),
+    [
+      ["gpt-image-2.5-sunburst", "transparent"],
+      ["gpt-image-2.5-flare", "opaque"],
+      ["gpt-image-2", "opaque"],
+    ],
+  );
+  assert.deepEqual(
+    state.editBodies.map((body) => [body.model, body.background]),
+    [
+      ["gpt-image-2.5-flare", "transparent"],
+      ["gpt-image-2.5-sunburst", "opaque"],
+      ["gpt-image-2", undefined],
+    ],
+  );
+  assert.equal("background" in state.editBodies[2]!, false);
+  assert.equal("input_fidelity" in state.generateBodies[0]!, false);
+  assert.equal("input_fidelity" in state.editBodies[0]!, false);
 });
 
 test("omits the SDK request-options argument when no signal is present", async () => {
@@ -292,10 +354,12 @@ test("omits the SDK request-options argument when no signal is present", async (
   await client.generate(generateRequest);
   await withSnapshotFixture(async ({ first }) => {
     await client.edit({
+      model: "gpt-image-2",
       prompt: "edit one image",
       quality: "auto",
       size: "1024x1024",
       output_format: "png",
+      background: "auto",
       images: Object.freeze([first]),
     });
   });
@@ -314,10 +378,12 @@ test("passes the caller AbortSignal to generate and edit SDK requests", async ()
   await withSnapshotFixture(async ({ first }) => {
     await client.edit(
       {
+        model: "gpt-image-2",
         prompt: "edit one image",
         quality: "auto",
         size: "1024x1024",
         output_format: "png",
+        background: "auto",
         images: Object.freeze([first]),
       },
       controller.signal,
@@ -375,10 +441,12 @@ test("default SDK adapter preserves underlying method arity with and without a s
     await client.generate(generateRequest, controller.signal);
     await withSnapshotFixture(async ({ first }) => {
       const request: ProviderEditRequest = {
+        model: "gpt-image-2",
         prompt: "exercise the default adapter",
         quality: "auto",
         size: "1024x1024",
         output_format: "png",
+        background: "auto",
         images: Object.freeze([first]),
       };
       await client.edit(request);
@@ -466,11 +534,13 @@ test("edit uploads immutable snapshots in order, includes the optional mask, and
         ),
     });
     const request: ProviderEditRequest = Object.freeze({
+      model: "gpt-image-2",
       prompt: "combine the references",
       quality: "medium",
       size: "1024x1536",
       output_format: "webp",
       output_compression: 62,
+      background: "auto",
       images: Object.freeze([first, second]),
       mask,
     });
@@ -480,6 +550,7 @@ test("edit uploads immutable snapshots in order, includes the optional mask, and
     assert.equal(state.editBodies.length, 1);
     const body = state.editBodies[0]!;
     assert.equal(body.model, "gpt-image-2");
+    assert.equal("background" in body, false);
     assert.equal(body.n, 1);
     assert.equal(body.prompt, "combine the references");
     assert.equal(body.quality, "medium");
@@ -509,11 +580,13 @@ test("edit omits an absent mask and PNG compression", async () => {
     const { client, state } = createClient();
 
     await client.edit({
+      model: "gpt-image-2",
       prompt: "edit one image",
       quality: "auto",
       size: "auto",
       output_format: "png",
       output_compression: 0,
+      background: "auto",
       images: Object.freeze([first]),
     });
 
@@ -543,10 +616,12 @@ test("edit rejects a non-PNG or 4 MiB mask before an SDK call", async () => {
       await assert.rejects(
         () =>
           client.edit({
+            model: "gpt-image-2",
             prompt: "edit with invalid mask",
             quality: "auto",
             size: "1024x1024",
             output_format: "png",
+            background: "auto",
             images: Object.freeze([first]),
             mask: invalidMask,
           }),
@@ -765,10 +840,12 @@ test("bounded snapshot reads reject descriptor/file size changes before an SDK c
     await assert.rejects(
       () =>
         client.edit({
+          model: "gpt-image-2",
           prompt: "edit changed snapshot",
           quality: "auto",
           size: "1024x1024",
           output_format: "png",
+          background: "auto",
           images: Object.freeze([snapshot]),
         }),
       hasAppErrorCode("INVALID_INPUT"),

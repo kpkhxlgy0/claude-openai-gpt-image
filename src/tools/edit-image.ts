@@ -145,6 +145,7 @@ export async function editImage(
       }
 
       const request: ProviderEditRequest = {
+        model: input.model,
         prompt: input.prompt,
         quality: input.quality,
         size: input.size,
@@ -152,6 +153,7 @@ export async function editImage(
         ...(input.output_compression === undefined
           ? {}
           : { output_compression: input.output_compression }),
+        background: input.background,
         images: imageSnapshots,
         ...(maskSnapshot === undefined ? {} : { mask: maskSnapshot }),
       };
@@ -166,6 +168,7 @@ export async function editImage(
       });
 
       result = buildImageToolOutput({
+        model: input.model,
         requestedSize: input.size,
         quality: input.quality,
         output,

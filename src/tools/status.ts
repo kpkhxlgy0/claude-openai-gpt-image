@@ -1,12 +1,10 @@
+import { DEFAULT_IMAGE_MODEL } from "../openai/types.ts";
 import type { ToolContext, StatusOutput } from "./types.ts";
-import {
-  DEFAULT_RELATIVE_OUTPUT_DIRECTORY,
-  MODEL,
-} from "./types.ts";
+import { DEFAULT_RELATIVE_OUTPUT_DIRECTORY } from "./types.ts";
 
 export function getStatus(context: ToolContext): StatusOutput {
   return {
-    model: MODEL,
+    model: DEFAULT_IMAGE_MODEL,
     api_key_configured: context.config.apiKeyConfigured,
     base_url_configured: context.config.baseUrlConfigured,
     base_url_valid: true,

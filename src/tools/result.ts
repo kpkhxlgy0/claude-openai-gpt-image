@@ -10,13 +10,13 @@ import {
 import type {
   ProviderImage,
   ProviderImageUsage,
+  ProviderModel,
   ProviderQuality,
   ProviderSize,
   ProviderTokenDetails,
 } from "../openai/types.ts";
 import {
   INLINE_PREVIEW_MAX_BYTES,
-  MODEL,
   type ImageToolOutput,
   type ImageToolWarning,
   type StatusOutput,
@@ -24,6 +24,7 @@ import {
 } from "./types.ts";
 
 export interface BuildImageToolOutputOptions {
+  readonly model: ProviderModel;
   readonly requestedSize: ProviderSize;
   readonly quality: ProviderQuality;
   readonly output: ResolvedOutputPath;
@@ -143,7 +144,7 @@ export function buildImageToolOutput(
   const usage = copyUsage(options.providerImage.usage);
 
   return {
-    model: MODEL,
+    model: options.model,
     workspace_root: options.output.root.canonicalPath,
     relative_path: options.published.relativePath,
     absolute_path: options.published.absolutePath,

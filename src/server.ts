@@ -11,6 +11,7 @@ import { z } from "zod";
 import { AppError, toErrorResult, type ErrorCode } from "./errors.ts";
 import { WorkspaceRootRegistry } from "./files/workspace-roots.ts";
 import { createSafeLogger, type SafeLogger } from "./logger.ts";
+import { DEFAULT_IMAGE_MODEL, IMAGE_MODELS } from "./openai/types.ts";
 import {
   editImageSchema,
   generateImageSchema,
@@ -69,7 +70,7 @@ const usageSchema = z.strictObject({
 });
 
 const statusSuccessOutputSchema = z.strictObject({
-  model: z.literal("gpt-image-2"),
+  model: z.literal(DEFAULT_IMAGE_MODEL),
   api_key_configured: z.boolean(),
   base_url_configured: z.boolean(),
   base_url_valid: z.boolean(),
@@ -81,7 +82,7 @@ const statusSuccessOutputSchema = z.strictObject({
 });
 
 const imageSuccessOutputSchema = z.strictObject({
-  model: z.literal("gpt-image-2"),
+  model: z.enum(IMAGE_MODELS),
   workspace_root: z.string(),
   relative_path: z.string(),
   absolute_path: z.string(),
@@ -127,7 +128,7 @@ const STATUS_DESCRIPTION =
   "Report safe configuration and approved workspace-root status without making an image provider request.";
 const GENERATE_TITLE = "Generate an image";
 const GENERATE_DESCRIPTION =
-  "Generate one GPT Image 2 image and publish it as a new file inside an approved workspace root.";
+  "Generate one GPT Image image with the selected model (default gpt-image-2) and publish it as a new file inside an approved workspace root.";
 const EDIT_TITLE = "Edit images";
 const EDIT_DESCRIPTION =
   "Edit one to eight workspace images and publish one new output file without modifying the inputs.";

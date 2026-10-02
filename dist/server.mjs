@@ -37119,6 +37119,11 @@ function addCompression(body, request) {
     body.output_compression = request.output_compression;
   }
 }
+function addBackground(body, request) {
+  if (request.background !== "auto") {
+    body.background = request.background;
+  }
+}
 function invalidProviderResponse(requestId) {
   return new AppError(
     "INVALID_PROVIDER_RESPONSE",
@@ -37204,7 +37209,7 @@ var OpenAIImageClient = class {
   async generate(request, signal) {
     signal?.throwIfAborted();
     const body = {
-      model: "gpt-image-2",
+      model: request.model,
       n: 1,
       prompt: request.prompt,
       quality: request.quality,
@@ -37213,6 +37218,7 @@ var OpenAIImageClient = class {
       moderation: request.moderation
     };
     addCompression(body, request);
+    addBackground(body, request);
     return this.#invoke(
       () => signal === void 0 ? this.#sdk.images.generate(body) : this.#sdk.images.generate(body, { signal }),
       signal
@@ -37226,7 +37232,7 @@ var OpenAIImageClient = class {
       images.push(await snapshotToUpload(snapshot, signal));
     }
     const body = {
-      model: "gpt-image-2",
+      model: request.model,
       n: 1,
       prompt: request.prompt,
       quality: request.quality,
@@ -37235,6 +37241,7 @@ var OpenAIImageClient = class {
       image: images
     };
     addCompression(body, request);
+    addBackground(body, request);
     if (request.mask !== void 0) {
       body.mask = await snapshotToUpload(request.mask, signal);
     }
@@ -45343,6 +45350,16 @@ var EMPTY_COMPLETION_RESULT = {
   }
 };
 
+// src/openai/types.ts
+var IMAGE_MODELS = [
+  "gpt-image-2",
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-flare"
+];
+var DEFAULT_IMAGE_MODEL = "gpt-image-2";
+var IMAGE_BACKGROUNDS = ["auto", "opaque", "transparent"];
+var TRANSPARENT_BACKGROUND_MODELS = Object.freeze(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
+
 // src/schemas.ts
 var PROMPT_MAX = 32e3;
 var MIN_PIXELS = 655360;
@@ -45405,8 +45422,10 @@ var sizeSchema = external_exports.string().superRefine((value, ctx) => {
   }
 });
 var promptSchema = external_exports.string().transform((value) => value.trim()).pipe(external_exports.string().min(1).max(PROMPT_MAX));
+var modelSchema = external_exports.enum(IMAGE_MODELS).default(DEFAULT_IMAGE_MODEL);
 var qualitySchema = external_exports.enum(["auto", "low", "medium", "high"]).default("auto");
 var outputFormatSchema = external_exports.enum(["png", "jpeg", "webp"]).default("png");
+var backgroundSchema = external_exports.enum(IMAGE_BACKGROUNDS).default("auto");
 var moderationSchema = external_exports.enum(["auto", "low"]).default("auto");
 var optionalPathSchema = external_exports.string().min(1).optional();
 function normalizeCompression(value) {
@@ -45434,22 +45453,43 @@ function assertCompressionRules(value) {
     );
   }
 }
+function assertBackgroundRules(value) {
+  if (value.background !== "transparent") {
+    return;
+  }
+  if (!TRANSPARENT_BACKGROUND_MODELS.includes(value.model)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      `background "transparent" requires model ${TRANSPARENT_BACKGROUND_MODELS.join(" or ")}`
+    );
+  }
+  if (value.output_format === "jpeg") {
+    throw new AppError(
+      "INVALID_INPUT",
+      'background "transparent" requires output_format "png" or "webp"'
+    );
+  }
+}
 var generateObjectSchema = external_exports.strictObject({
   prompt: promptSchema,
+  model: modelSchema,
   quality: qualitySchema,
   size: sizeSchema.default("1024x1024"),
   output_format: outputFormatSchema,
   output_compression: external_exports.number().int().min(0).max(100).optional(),
+  background: backgroundSchema,
   moderation: moderationSchema,
   output_path: optionalPathSchema,
   workspace_root: optionalPathSchema
 });
 var editObjectSchema = external_exports.strictObject({
   prompt: promptSchema,
+  model: modelSchema,
   quality: qualitySchema,
   size: sizeSchema.default("1024x1024"),
   output_format: outputFormatSchema,
   output_compression: external_exports.number().int().min(0).max(100).optional(),
+  background: backgroundSchema,
   output_path: optionalPathSchema,
   workspace_root: optionalPathSchema,
   image_paths: external_exports.array(external_exports.string().min(1)).min(1).max(8),
@@ -45458,10 +45498,12 @@ var editObjectSchema = external_exports.strictObject({
 var statusSchema = external_exports.strictObject({});
 var generateImageSchema = external_exports.preprocess((input) => input, generateObjectSchema).transform((value) => {
   assertCompressionRules(value);
+  assertBackgroundRules(value);
   return normalizeCompression(value);
 });
 var editImageSchema = external_exports.preprocess((input) => input, editObjectSchema).transform((value) => {
   assertCompressionRules(value);
+  assertBackgroundRules(value);
   return normalizeCompression(value);
 });
 
@@ -46188,7 +46230,6 @@ var WorkspacePaths = class {
 };
 
 // src/tools/types.ts
-var MODEL = "gpt-image-2";
 var DEFAULT_RELATIVE_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image-2";
 var INLINE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 function deferCleanup(task) {
@@ -46306,7 +46347,7 @@ function buildImageToolOutput(options) {
   const requestId = sanitizeRequestId(options.providerImage.requestId);
   const usage = copyUsage(options.providerImage.usage);
   return {
-    model: MODEL,
+    model: options.model,
     workspace_root: options.output.root.canonicalPath,
     relative_path: options.published.relativePath,
     absolute_path: options.published.absolutePath,
@@ -46510,11 +46551,13 @@ async function editImage(input, context, signal) {
         );
       }
       const request = {
+        model: input.model,
         prompt: input.prompt,
         quality: input.quality,
         size: input.size,
         output_format: input.output_format,
         ...input.output_compression === void 0 ? {} : { output_compression: input.output_compression },
+        background: input.background,
         images: imageSnapshots,
         ...maskSnapshot === void 0 ? {} : { mask: maskSnapshot }
       };
@@ -46528,6 +46571,7 @@ async function editImage(input, context, signal) {
         ...signal === void 0 ? {} : { signal }
       });
       result = buildImageToolOutput({
+        model: input.model,
         requestedSize: input.size,
         quality: input.quality,
         output,
@@ -46583,11 +46627,13 @@ async function generateImage(input, context, signal) {
     operations
   );
   const request = {
+    model: input.model,
     prompt: input.prompt,
     quality: input.quality,
     size: input.size,
     output_format: input.output_format,
     ...input.output_compression === void 0 ? {} : { output_compression: input.output_compression },
+    background: input.background,
     moderation: input.moderation
   };
   return context.paidCallGate.runExclusive(async () => {
@@ -46607,6 +46653,7 @@ async function generateImage(input, context, signal) {
       ...signal === void 0 ? {} : { signal }
     });
     return buildImageToolOutput({
+      model: input.model,
       requestedSize: input.size,
       quality: input.quality,
       output,
@@ -46619,7 +46666,7 @@ async function generateImage(input, context, signal) {
 // src/tools/status.ts
 function getStatus(context) {
   return {
-    model: MODEL,
+    model: DEFAULT_IMAGE_MODEL,
     api_key_configured: context.config.apiKeyConfigured,
     base_url_configured: context.config.baseUrlConfigured,
     base_url_valid: true,
@@ -46671,7 +46718,7 @@ var usageSchema = external_exports.strictObject({
   output_tokens_details: tokenDetailsSchema.optional()
 });
 var statusSuccessOutputSchema = external_exports.strictObject({
-  model: external_exports.literal("gpt-image-2"),
+  model: external_exports.literal(DEFAULT_IMAGE_MODEL),
   api_key_configured: external_exports.boolean(),
   base_url_configured: external_exports.boolean(),
   base_url_valid: external_exports.boolean(),
@@ -46682,7 +46729,7 @@ var statusSuccessOutputSchema = external_exports.strictObject({
   server_version: external_exports.string().min(1)
 });
 var imageSuccessOutputSchema = external_exports.strictObject({
-  model: external_exports.literal("gpt-image-2"),
+  model: external_exports.enum(IMAGE_MODELS),
   workspace_root: external_exports.string(),
   relative_path: external_exports.string(),
   absolute_path: external_exports.string(),
@@ -46719,7 +46766,7 @@ var IMAGE_ANNOTATIONS = {
 var STATUS_TITLE = "Get GPT Image 2 status";
 var STATUS_DESCRIPTION = "Report safe configuration and approved workspace-root status without making an image provider request.";
 var GENERATE_TITLE = "Generate an image";
-var GENERATE_DESCRIPTION = "Generate one GPT Image 2 image and publish it as a new file inside an approved workspace root.";
+var GENERATE_DESCRIPTION = "Generate one GPT Image image with the selected model (default gpt-image-2) and publish it as a new file inside an approved workspace root.";
 var EDIT_TITLE = "Edit images";
 var EDIT_DESCRIPTION = "Edit one to eight workspace images and publish one new output file without modifying the inputs.";
 function errorCode(error51) {

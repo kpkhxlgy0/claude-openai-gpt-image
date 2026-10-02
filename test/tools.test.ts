@@ -227,19 +227,23 @@ function makeContext(
 }
 
 const generateInput: GenerateImageInput = {
+  model: "gpt-image-2",
   prompt: "draw a safe test image",
   quality: "high",
   size: "1024x1024",
   output_format: "png",
+  background: "auto",
   moderation: "low",
   output_path: "outputs/generated.png",
 };
 
 const editInput: EditImageInput = {
+  model: "gpt-image-2",
   prompt: "edit the safe test image",
   quality: "medium",
   size: "1024x1024",
   output_format: "png",
+  background: "auto",
   image_paths: ["inputs/first.png", "inputs/second.jpeg"],
   mask_path: "inputs/mask.png",
   output_path: "outputs/edited.png",
@@ -418,10 +422,12 @@ test("generate maps validated fields, publishes one image, and reports safe actu
 
     assert.deepEqual(provider.generateRequests, [
       {
+        model: "gpt-image-2",
         prompt: "draw a safe test image",
         quality: "high",
         size: "1024x1024",
         output_format: "png",
+        background: "auto",
         moderation: "low",
       },
     ]);
@@ -558,8 +564,61 @@ test("edit snapshots inputs plus mask in order and validates the mask before pro
     assert.equal(request.quality, editInput.quality);
     assert.equal(request.size, editInput.size);
     assert.equal(request.output_format, editInput.output_format);
+    assert.equal(request.model, "gpt-image-2");
+    assert.equal(request.background, "auto");
     assert.equal(snapshots.disposals[0]!.count, 1);
     assert.equal(result.relative_path, "outputs/edited.png");
+    assert.equal(result.model, "gpt-image-2");
+  });
+});
+
+test("generate and edit forward the selected model and background and report the model used", async () => {
+  await withWorkspace(async ({ root, roots, paths }) => {
+    await mkdir(path.join(root, "inputs"), { recursive: true });
+    await writeFile(path.join(root, "inputs", "first.png"), "first");
+    const provider = new FakeProvider();
+    const { snapshotter } = createSnapshotter(() => PNG_INFO);
+    const context = makeContext(
+      roots,
+      provider,
+      makeOperations(paths, { snapshotInputs: snapshotter }),
+    );
+
+    const generated = await generateImage(
+      {
+        ...generateInput,
+        model: "gpt-image-2.5-sunburst",
+        background: "transparent",
+        output_path: "outputs/sunburst.png",
+      },
+      context,
+    );
+    const { mask_path: _maskPath, ...withoutMask } = editInput;
+    const edited = await editImage(
+      {
+        ...withoutMask,
+        model: "gpt-image-2.5-flare",
+        background: "opaque",
+        image_paths: ["inputs/first.png"],
+        output_path: "outputs/flare.png",
+      },
+      context,
+    );
+
+    assert.equal(provider.generateRequests.length, 1);
+    assert.equal(provider.generateRequests[0]!.model, "gpt-image-2.5-sunburst");
+    assert.equal(provider.generateRequests[0]!.background, "transparent");
+    assert.equal(provider.editRequests.length, 1);
+    assert.equal(provider.editRequests[0]!.model, "gpt-image-2.5-flare");
+    assert.equal(provider.editRequests[0]!.background, "opaque");
+    assert.equal(generated.model, "gpt-image-2.5-sunburst");
+    assert.equal(edited.model, "gpt-image-2.5-flare");
+    assert.equal(toMcpSuccess(generated).structuredContent?.model, "gpt-image-2.5-sunburst");
+    const editedText = toMcpSuccess(edited).content[0];
+    assert.ok(
+      editedText?.type === "text" &&
+        editedText.text.startsWith("Saved gpt-image-2.5-flare image to "),
+    );
   });
 });
 

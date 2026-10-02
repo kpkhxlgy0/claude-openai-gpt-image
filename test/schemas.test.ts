@@ -1,5 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { AppError } from "../src/errors.ts";
+import {
+  DEFAULT_IMAGE_MODEL,
+  IMAGE_MODELS,
+  TRANSPARENT_BACKGROUND_MODELS,
+} from "../src/openai/types.ts";
 import {
   editImageSchema,
   generateImageSchema,
@@ -10,6 +16,18 @@ import {
 function assertThrowsValidation(fn: () => unknown): void {
   assert.throws(fn, (error: unknown) => error instanceof Error);
 }
+
+function assertInvalidInput(fn: () => unknown, message: RegExp): void {
+  assert.throws(
+    fn,
+    (error: unknown) =>
+      error instanceof AppError &&
+      error.code === "INVALID_INPUT" &&
+      message.test(error.message),
+  );
+}
+
+const editBase = { prompt: "edit this", image_paths: ["a.png"] } as const;
 
 test("statusSchema accepts empty objects and rejects unknown fields", () => {
   assert.deepEqual(statusSchema.parse({}), {});
@@ -25,9 +43,170 @@ test("generateImageSchema applies defaults and trims prompts", () => {
   assert.equal(parsed.size, "1024x1024");
   assert.equal(parsed.output_format, "png");
   assert.equal(parsed.moderation, "auto");
+  assert.equal(parsed.model, "gpt-image-2");
+  assert.equal(parsed.background, "auto");
   assert.equal("output_compression" in parsed, false);
   assert.equal("output_path" in parsed, false);
   assert.equal("workspace_root" in parsed, false);
+});
+
+test("model constants expose exactly the supported models and transparent allowlist", () => {
+  assert.deepEqual(
+    [...IMAGE_MODELS],
+    ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
+  );
+  assert.equal(DEFAULT_IMAGE_MODEL, "gpt-image-2");
+  assert.deepEqual(
+    [...TRANSPARENT_BACKGROUND_MODELS],
+    ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
+  );
+});
+
+test("generate and edit schemas default model and background and accept every supported model", () => {
+  const edit = editImageSchema.parse(editBase);
+  assert.equal(edit.model, "gpt-image-2");
+  assert.equal(edit.background, "auto");
+
+  for (const model of [
+    "gpt-image-2",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare",
+  ] as const) {
+    assert.equal(generateImageSchema.parse({ prompt: "ok", model }).model, model);
+    assert.equal(editImageSchema.parse({ ...editBase, model }).model, model);
+    for (const background of ["auto", "opaque"] as const) {
+      for (const output_format of ["png", "jpeg", "webp"] as const) {
+        const generated = generateImageSchema.parse({
+          prompt: "ok",
+          model,
+          background,
+          output_format,
+        });
+        assert.equal(generated.background, background);
+        const edited = editImageSchema.parse({
+          ...editBase,
+          model,
+          background,
+          output_format,
+        });
+        assert.equal(edited.background, background);
+      }
+    }
+  }
+});
+
+test("generate and edit schemas reject unknown models and backgrounds", () => {
+  for (const model of [
+    "gpt-image-1",
+    "gpt-image-1.5",
+    "dall-e-3",
+    "gpt-image-2.5",
+    "gpt-image-2-2026-04-21",
+    "GPT-IMAGE-2",
+    "",
+  ]) {
+    assertThrowsValidation(() => generateImageSchema.parse({ prompt: "ok", model }));
+    assertThrowsValidation(() => editImageSchema.parse({ ...editBase, model }));
+  }
+  for (const background of ["none", "Transparent", ""]) {
+    assertThrowsValidation(() =>
+      generateImageSchema.parse({ prompt: "ok", background }),
+    );
+    assertThrowsValidation(() =>
+      editImageSchema.parse({ ...editBase, background }),
+    );
+  }
+});
+
+test("transparent backgrounds are accepted only for GPT Image 2.5 models with PNG or WebP", () => {
+  for (const model of ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"] as const) {
+    for (const output_format of ["png", "webp"] as const) {
+      const generated = generateImageSchema.parse({
+        prompt: "ok",
+        model,
+        background: "transparent",
+        output_format,
+      });
+      assert.equal(generated.model, model);
+      assert.equal(generated.background, "transparent");
+      assert.equal(generated.output_format, output_format);
+
+      const edited = editImageSchema.parse({
+        ...editBase,
+        model,
+        background: "transparent",
+        output_format,
+      });
+      assert.equal(edited.model, model);
+      assert.equal(edited.background, "transparent");
+      assert.equal(edited.output_format, output_format);
+    }
+
+    const implicitPng = generateImageSchema.parse({
+      prompt: "ok",
+      model,
+      background: "transparent",
+    });
+    assert.equal(implicitPng.output_format, "png");
+
+    assertInvalidInput(
+      () =>
+        generateImageSchema.parse({
+          prompt: "ok",
+          model,
+          background: "transparent",
+          output_format: "jpeg",
+        }),
+      /^INVALID_INPUT: background "transparent" requires output_format "png" or "webp"$/,
+    );
+    assertInvalidInput(
+      () =>
+        editImageSchema.parse({
+          ...editBase,
+          model,
+          background: "transparent",
+          output_format: "jpeg",
+        }),
+      /^INVALID_INPUT: background "transparent" requires output_format "png" or "webp"$/,
+    );
+  }
+});
+
+test("transparent backgrounds are rejected for gpt-image-2 in every format", () => {
+  const message =
+    /^INVALID_INPUT: background "transparent" requires model gpt-image-2\.5-sunburst or gpt-image-2\.5-flare$/;
+  for (const model of [undefined, "gpt-image-2"] as const) {
+    for (const output_format of [undefined, "png", "jpeg", "webp"] as const) {
+      const fields = {
+        background: "transparent",
+        ...(model === undefined ? {} : { model }),
+        ...(output_format === undefined ? {} : { output_format }),
+      };
+      assertInvalidInput(
+        () => generateImageSchema.parse({ prompt: "ok", ...fields }),
+        message,
+      );
+      assertInvalidInput(
+        () => editImageSchema.parse({ ...editBase, ...fields }),
+        message,
+      );
+    }
+  }
+
+  const opaqueJpeg = generateImageSchema.parse({
+    prompt: "ok",
+    model: "gpt-image-2",
+    background: "opaque",
+    output_format: "jpeg",
+  });
+  assert.equal(opaqueJpeg.background, "opaque");
+  const opaqueJpegEdit = editImageSchema.parse({
+    ...editBase,
+    model: "gpt-image-2",
+    background: "opaque",
+    output_format: "jpeg",
+  });
+  assert.equal(opaqueJpegEdit.background, "opaque");
 });
 
 test("generateImageSchema enforces prompt limits and rejects unknown fields", () => {

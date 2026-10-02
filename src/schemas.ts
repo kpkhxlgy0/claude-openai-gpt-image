@@ -1,5 +1,13 @@
 import { z } from "zod";
 import { AppError } from "./errors.ts";
+import {
+  DEFAULT_IMAGE_MODEL,
+  IMAGE_BACKGROUNDS,
+  IMAGE_MODELS,
+  TRANSPARENT_BACKGROUND_MODELS,
+  type ProviderBackground,
+  type ProviderModel,
+} from "./openai/types.ts";
 
 const PROMPT_MAX = 32_000;
 const MIN_PIXELS = 655_360;
@@ -14,11 +22,13 @@ export interface ImageSize {
 }
 
 export interface GenerateImageInput {
+  model: ProviderModel;
   prompt: string;
   quality: "auto" | "low" | "medium" | "high";
   size: "auto" | `${number}x${number}`;
   output_format: "png" | "jpeg" | "webp";
   output_compression?: number;
+  background: ProviderBackground;
   moderation: "auto" | "low";
   output_path?: string;
   workspace_root?: string;
@@ -101,8 +111,10 @@ const promptSchema = z
   .transform((value) => value.trim())
   .pipe(z.string().min(1).max(PROMPT_MAX));
 
+const modelSchema = z.enum(IMAGE_MODELS).default(DEFAULT_IMAGE_MODEL);
 const qualitySchema = z.enum(["auto", "low", "medium", "high"]).default("auto");
 const outputFormatSchema = z.enum(["png", "jpeg", "webp"]).default("png");
+const backgroundSchema = z.enum(IMAGE_BACKGROUNDS).default("auto");
 const moderationSchema = z.enum(["auto", "low"]).default("auto");
 const optionalPathSchema = z.string().min(1).optional();
 
@@ -144,12 +156,40 @@ function assertCompressionRules(value: CompressionFields): void {
   }
 }
 
+type BackgroundFields = {
+  model: ProviderModel;
+  background: ProviderBackground;
+  output_format: "png" | "jpeg" | "webp";
+};
+
+function assertBackgroundRules(value: BackgroundFields): void {
+  if (value.background !== "transparent") {
+    return;
+  }
+
+  if (!TRANSPARENT_BACKGROUND_MODELS.includes(value.model)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      `background "transparent" requires model ${TRANSPARENT_BACKGROUND_MODELS.join(" or ")}`,
+    );
+  }
+
+  if (value.output_format === "jpeg") {
+    throw new AppError(
+      "INVALID_INPUT",
+      'background "transparent" requires output_format "png" or "webp"',
+    );
+  }
+}
+
 const generateObjectSchema = z.strictObject({
   prompt: promptSchema,
+  model: modelSchema,
   quality: qualitySchema,
   size: sizeSchema.default("1024x1024"),
   output_format: outputFormatSchema,
   output_compression: z.number().int().min(0).max(100).optional(),
+  background: backgroundSchema,
   moderation: moderationSchema,
   output_path: optionalPathSchema,
   workspace_root: optionalPathSchema,
@@ -157,10 +197,12 @@ const generateObjectSchema = z.strictObject({
 
 const editObjectSchema = z.strictObject({
   prompt: promptSchema,
+  model: modelSchema,
   quality: qualitySchema,
   size: sizeSchema.default("1024x1024"),
   output_format: outputFormatSchema,
   output_compression: z.number().int().min(0).max(100).optional(),
+  background: backgroundSchema,
   output_path: optionalPathSchema,
   workspace_root: optionalPathSchema,
   image_paths: z.array(z.string().min(1)).min(1).max(8),
@@ -173,6 +215,7 @@ export const generateImageSchema = z
   .preprocess((input) => input, generateObjectSchema)
   .transform((value): GenerateImageInput => {
     assertCompressionRules(value);
+    assertBackgroundRules(value);
     return normalizeCompression(value) as GenerateImageInput;
   });
 
@@ -180,5 +223,6 @@ export const editImageSchema = z
   .preprocess((input) => input, editObjectSchema)
   .transform((value): EditImageInput => {
     assertCompressionRules(value);
+    assertBackgroundRules(value);
     return normalizeCompression(value) as EditImageInput;
   });

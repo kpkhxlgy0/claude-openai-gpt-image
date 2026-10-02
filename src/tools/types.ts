@@ -21,13 +21,14 @@ import {
 import type { WorkspaceRootRegistry } from "../files/workspace-roots.ts";
 import type { ImageFormat } from "../images/types.ts";
 import type {
+  DEFAULT_IMAGE_MODEL,
   ImageProvider,
   ProviderImageUsage,
+  ProviderModel,
   ProviderQuality,
   ProviderSize,
 } from "../openai/types.ts";
 
-export const MODEL = "gpt-image-2" as const;
 export const DEFAULT_RELATIVE_OUTPUT_DIRECTORY =
   ".claude/generated-images/gpt-image-2" as const;
 export const INLINE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
@@ -38,7 +39,7 @@ export type ImageToolWarning =
   | "SNAPSHOT_CLEANUP_PENDING";
 
 export interface StatusOutput {
-  readonly model: typeof MODEL;
+  readonly model: typeof DEFAULT_IMAGE_MODEL;
   readonly api_key_configured: boolean;
   readonly base_url_configured: boolean;
   readonly base_url_valid: boolean;
@@ -53,7 +54,7 @@ export interface InlineImagePreview {
 }
 
 export interface ImageToolOutput {
-  readonly model: typeof MODEL;
+  readonly model: ProviderModel;
   readonly workspace_root: string;
   readonly relative_path: string;
   readonly absolute_path: string;

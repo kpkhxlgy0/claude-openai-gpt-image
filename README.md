@@ -77,25 +77,33 @@ Run `/gpt-image-2:setup` after installation. The command calls only `get_status`
 
 ### `get_status`
 
-Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, model, server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it through `Configure options` in the Claude Code TUI, then restart Claude Desktop or start a new Desktop Local session. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
+Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, the default model (`gpt-image-2`), server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it through `Configure options` in the Claude Code TUI, then restart Claude Desktop or start a new Desktop Local session. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
 
 ### `generate_image`
 
-Generates one image with model `gpt-image-2`, fixed `n: 1`, and saves one new file. Main inputs are:
+Generates one image with the selected `model` (default `gpt-image-2`; `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` can also be selected), fixed `n: 1`, and saves one new file. Main inputs are:
 
 - `prompt`
+- `model`: `gpt-image-2` (default), `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare`
 - `quality`: `auto`, `low`, `medium`, or `high`
 - `size`
 - `output_format`: `png`, `jpeg`, or `webp`
 - optional JPEG/WebP `output_compression` from 0 to 100
+- `background`: `auto` (default), `opaque`, or `transparent`
 - `moderation`: `auto` or `low`
 - optional relative `output_path` and approved `workspace_root`
 
 ### `edit_image`
 
-Edits one to eight edit inputs in the supplied order and saves one new image. Inputs may be PNG, JPEG, or WebP. The limit is 50 MiB per input and 200 MiB aggregate across all edit images plus the optional mask.
+Edits one to eight edit inputs in the supplied order and saves one new image. Inputs may be PNG, JPEG, or WebP. The limit is 50 MiB per input and 200 MiB aggregate across all edit images plus the optional mask. `edit_image` accepts the same `model` and `background` inputs as `generate_image`.
 
-An optional mask must be a PNG with an alpha channel, match the first input image's dimensions, and be less than 4 MiB. Transparent output backgrounds are not supported. Mask alpha only identifies the edit region.
+An optional mask must be a PNG with an alpha channel, match the first input image's dimensions, and be less than 4 MiB. Mask alpha only identifies the edit region; it does not request a transparent output background.
+
+### Models and backgrounds
+
+The default model is `gpt-image-2`. Results report the model actually used, and the default output directory stays `.claude/generated-images/gpt-image-2` for every model. Cost and output can differ by model.
+
+Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `png` or `webp` output. The API marks transparent-background support for `gpt-image-2` as preview, so the plugin rejects transparent requests for `gpt-image-2` locally with `INVALID_INPUT` before any paid call. Transparent requests with `jpeg` output are rejected the same way. The default `background: "auto"` sends no background field to the provider.
 
 ## Formats, sizes, and output
 
@@ -103,7 +111,7 @@ An optional mask must be a PNG with an alpha channel, match the first input imag
 - Preset sizes are `1024x1024`, `1536x1024` (landscape), and `1024x1536` (portrait). The tool default is `1024x1024`; `auto` is also accepted.
 - A custom `WIDTHxHEIGHT` must use multiples of 16, each edge must be at most 3840 pixels, aspect ratio must be between 1:3 and 3:1, and total pixels must be between 655,360 and 8,294,400.
 - PNG does not use output compression. JPEG and WebP accept compression values from 0 to 100.
-- If `output_path` is omitted, output goes under `.claude/generated-images/gpt-image-2` with a unique prompt-free filename.
+- If `output_path` is omitted, output goes under `.claude/generated-images/gpt-image-2` with a unique prompt-free filename, whichever model is selected.
 - Explicit output paths are preserved, must be relative to an approved workspace root, and must use an extension matching the requested format.
 - Existing destinations are rejected. No-overwrite publication also prevents concurrent calls from replacing the same target.
 
@@ -117,7 +125,7 @@ Only typed outcome and metadata fields are authoritative facts. Returned paths, 
 
 ## Cost, concurrency, and retries
 
-Generation and editing are paid provider operations. The plugin fixes one output per request and permits one paid call at a time in each server process. There are no SDK retries and no application retries, so a failed paid call is not automatically repeated. Confirm prompts, edit inputs, size, format, and output path before invoking an image tool.
+Generation and editing are paid provider operations. The plugin fixes one output per request and permits one paid call at a time in each server process. There are no SDK retries and no application retries, so a failed paid call is not automatically repeated. Confirm prompts, edit inputs, model, background, size, format, and output path before invoking an image tool.
 
 ## Workspace and security boundary
 

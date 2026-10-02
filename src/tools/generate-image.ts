@@ -23,6 +23,7 @@ export async function generateImage(
     operations,
   );
   const request: ProviderGenerateRequest = {
+    model: input.model,
     prompt: input.prompt,
     quality: input.quality,
     size: input.size,
@@ -30,6 +31,7 @@ export async function generateImage(
     ...(input.output_compression === undefined
       ? {}
       : { output_compression: input.output_compression }),
+    background: input.background,
     moderation: input.moderation,
   };
 
@@ -52,6 +54,7 @@ export async function generateImage(
     });
 
     return buildImageToolOutput({
+      model: input.model,
       requestedSize: input.size,
       quality: input.quality,
       output,

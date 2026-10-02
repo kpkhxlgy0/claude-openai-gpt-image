@@ -2,6 +2,18 @@
 
 All notable changes to this plugin are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- Selectable `model` for `generate_image` and `edit_image`: `gpt-image-2` (default), `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare`. Image results report the model actually used, `get_status` reports the default model, and the default output directory remains `.claude/generated-images/gpt-image-2` for every model.
+- `background` parameter for `generate_image` and `edit_image`: `auto` (default), `opaque`, or `transparent`. The default `auto` sends no `background` field, so default provider requests are unchanged.
+- Transparent backgrounds require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare` with PNG or WebP output. Because the API marks `gpt-image-2` transparency as preview, transparent requests for `gpt-image-2`, and transparent requests with JPEG output, are rejected locally with `INVALID_INPUT` before any paid call.
+
+### Verification scope
+
+Offline schema, provider-adapter, tool, and protocol tests use fake provider clients. No paid image API call was made with any model.
+
 ## [0.1.1] - 2026-08-20
 
 ### Added

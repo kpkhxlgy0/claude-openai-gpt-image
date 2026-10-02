@@ -271,6 +271,15 @@ function addCompression(
   }
 }
 
+function addBackground(
+  body: OpenAIImageGenerateBody | OpenAIImageEditBody,
+  request: ProviderGenerateRequest | ProviderEditRequest,
+): void {
+  if (request.background !== "auto") {
+    body.background = request.background;
+  }
+}
+
 function invalidProviderResponse(requestId: unknown): AppError {
   return new AppError(
     "INVALID_PROVIDER_RESPONSE",
@@ -388,7 +397,7 @@ export class OpenAIImageClient implements ImageProvider {
   ): Promise<ProviderImage> {
     signal?.throwIfAborted();
     const body: OpenAIImageGenerateBody = {
-      model: "gpt-image-2",
+      model: request.model,
       n: 1,
       prompt: request.prompt,
       quality: request.quality,
@@ -397,6 +406,7 @@ export class OpenAIImageClient implements ImageProvider {
       moderation: request.moderation,
     };
     addCompression(body, request);
+    addBackground(body, request);
     return this.#invoke(
       () =>
         signal === undefined
@@ -418,7 +428,7 @@ export class OpenAIImageClient implements ImageProvider {
     }
 
     const body: OpenAIImageEditBody = {
-      model: "gpt-image-2",
+      model: request.model,
       n: 1,
       prompt: request.prompt,
       quality: request.quality,
@@ -427,6 +437,7 @@ export class OpenAIImageClient implements ImageProvider {
       image: images,
     };
     addCompression(body, request);
+    addBackground(body, request);
     if (request.mask !== undefined) {
       body.mask = await snapshotToUpload(request.mask, signal);
     }

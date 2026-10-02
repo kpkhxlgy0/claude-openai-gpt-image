@@ -16,13 +16,14 @@ Use this Skill only for explicit image generation intent or explicit image editi
 - Do not use Bash, Write, Agent, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC as a fallback.
 - Improve an underspecified visual prompt only enough to make it executable, while preserving every user constraint.
 - Put literal text that must appear in the image in quotation marks and require exact spelling.
-- Transparent output is unsupported by GPT Image 2. State that limitation before any paid call and use an opaque background only when it is consistent with the user's request.
+- Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `output_format` `png` or `webp`. The default model `gpt-image-2` rejects transparent requests. State that limitation before any paid call and use an opaque background only when it is consistent with the user's request.
+- Never switch away from the default model `gpt-image-2`, or to a different model, without the user's explicit agreement; cost and output differ by model.
 - Preserve a user-specified output path as `output_path`. Output paths must remain inside an approved workspace root.
 - When more than one approved workspace root is available, pass `workspace_root` to select one of those roots; the selector never grants access to a new root.
 - When the user does not request a safe output path, omit `output_path` so the tool uses its default project directory.
 - The default output directory is relative to the selected workspace root.
 - Never overwrite an existing file. If the requested destination exists, ask for a different path or let the tool choose a unique default.
-- Image calls may incur provider cost. Resolve material ambiguity about the prompt, inputs, format, size, and destination before calling a paid tool; do not make speculative calls.
+- Image calls may incur provider cost. Resolve material ambiguity about the prompt, inputs, model, background, format, size, and destination before calling a paid tool; do not make speculative calls.
 - Do not automatically retry a failed paid image call.
 - Every paid image call requires a new explicit user instruction for that call.
 - A prior instruction to keep improving automatically, work unattended, or choose parameters does not authorize another paid call after a success.
