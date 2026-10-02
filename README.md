@@ -4,6 +4,12 @@ Generate and edit project images with OpenAI GPT Image 2 through a bundled local
 
 [简体中文](README.zh-CN.md)
 
+## Quick start
+
+1. Install: `claude plugin marketplace add <repository-url-or-local-path>`, then `claude plugin install gpt-image-2@kpk-plugins --scope user` (or use **Settings → Plugins** in Claude Desktop Code).
+2. Configure the key: in an interactive Claude Code terminal run `/plugin` → `Installed` → `gpt-image-2` → `Configure options`, fill the sensitive **OpenAI API key** field, then restart Claude Desktop or start a new Desktop Local session.
+3. Try it: run `/gpt-image-2:setup` to confirm `api_key_configured: true`, then ask Claude to "generate a 1024x1024 PNG of a red apple icon" (one paid call); the file is saved under `.claude/generated-images/gpt-image-2/`.
+
 ## Supported Claude surface
 
 This plugin is for **Claude Desktop Code**, the project-oriented Code experience in the Claude Desktop application. **Claude Desktop Chat is not supported.** It is not an MCPB package and is not a remote MCP service.

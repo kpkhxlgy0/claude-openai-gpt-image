@@ -4,6 +4,12 @@
 
 [English](README.md)
 
+## 快速开始
+
+1. 安装：运行 `claude plugin marketplace add <repository-url-or-local-path>`，再运行 `claude plugin install gpt-image-2@kpk-plugins --scope user`（也可以在 Claude Desktop Code 的 **Settings → Plugins** 中安装）。
+2. 配置 Key：在交互式 Claude Code 终端运行 `/plugin` → `Installed` → `gpt-image-2` → `Configure options`，填写敏感字段 **OpenAI API key**，然后重启 Claude Desktop 或新建 Desktop Local 会话。
+3. 试一次：运行 `/gpt-image-2:setup` 确认 `api_key_configured: true`，然后让 Claude“生成一张 1024x1024 的红苹果图标 PNG”（一次付费调用）；文件保存在 `.claude/generated-images/gpt-image-2/` 下。
+
 ## 支持的 Claude 使用界面
 
 本插件面向 Claude Desktop 应用中的项目型 **Claude Desktop Code**。**Claude Desktop Chat 不受支持。** 本插件不是 MCPB，也不是远程 MCP 服务。
