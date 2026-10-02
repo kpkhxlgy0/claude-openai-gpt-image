@@ -91,10 +91,10 @@ const EXPECTED_DEV_DEPENDENCIES = {
 
 const REQUIRED_SCRIPTS = {
   typecheck: "tsc --noEmit",
-  test: "tsx --test test/**/*.test.ts",
+  test: "tsx --test test/*.test.ts test/dist/*.test.ts",
   build: "node scripts/build.mjs",
-  "test:dist": "tsx --test test/dist/**/*.test.ts",
-  "test:host": "tsx --test test/host/**/*.smoke.ts",
+  "test:dist": "tsx --test test/dist/*.test.ts",
+  "test:host": "tsx --test test/host/*.smoke.ts",
   validate: "node scripts/validate-package.mjs",
 };
 

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { access, readFile } from "node:fs/promises";
+import { access, readdir, readFile } from "node:fs/promises";
+import path from "node:path";
 import test from "node:test";
 
 async function json(path: string) {
@@ -35,12 +36,33 @@ test("package scripts and engines match the scaffold contract", async () => {
   assert.equal(pkg.engines.node, ">=20");
   assert.deepEqual(pkg.scripts, {
     typecheck: "tsc --noEmit",
-    test: "tsx --test test/**/*.test.ts",
+    test: "tsx --test test/*.test.ts test/dist/*.test.ts",
     build: "node scripts/build.mjs",
-    "test:dist": "tsx --test test/dist/**/*.test.ts",
-    "test:host": "tsx --test test/host/**/*.smoke.ts",
+    "test:dist": "tsx --test test/dist/*.test.ts",
+    "test:host": "tsx --test test/host/*.smoke.ts",
     validate: "node scripts/validate-package.mjs",
   });
+});
+
+test("npm test covers every test file without recursive shell globs", async () => {
+  const pkg = await json("package.json");
+  const patterns: string[] = pkg.scripts.test.split(" ").slice(2);
+  for (const script of ["test", "test:dist", "test:host"]) {
+    assert.doesNotMatch(pkg.scripts[script], /\*\*/);
+  }
+  const coveredDirectories = new Set(
+    patterns.map((pattern) => path.posix.dirname(pattern)),
+  );
+  const testFiles = (await readdir("test", { recursive: true }))
+    .map((file) => `test/${file.replaceAll("\\", "/")}`)
+    .filter((file) => file.endsWith(".test.ts"));
+  assert.ok(testFiles.length > 0);
+  for (const file of testFiles) {
+    assert.ok(
+      coveredDirectories.has(path.posix.dirname(file)),
+      `npm test does not cover ${file}`,
+    );
+  }
 });
 
 test("release version is synchronized across source and package metadata", async () => {
