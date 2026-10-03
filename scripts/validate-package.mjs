@@ -34,7 +34,7 @@ const REQUIRED_FILES = [
   "scripts/build.mjs",
   "scripts/git-index.d.mts",
   "scripts/git-index.mjs",
-  "skills/gpt-image-2/SKILL.md",
+  "skills/gpt-image/SKILL.md",
   "skills/gpt-image-result-handling/SKILL.md",
   "test/dist/installed-plugin.test.ts",
   "test/host/claude-host.smoke.ts",
@@ -51,7 +51,7 @@ const TRACKED_DISTRIBUTION_FILES = [
   "THIRD_PARTY_NOTICES.md",
   "commands/setup.md",
   "dist/server.mjs",
-  "skills/gpt-image-2/SKILL.md",
+  "skills/gpt-image/SKILL.md",
   "skills/gpt-image-result-handling/SKILL.md",
 ];
 
@@ -383,8 +383,8 @@ for (const [name, expectedVersion] of Object.entries({
   }
 }
 
-if (plugin.name !== "gpt-image-2") {
-  fail("plugin.json name must be gpt-image-2");
+if (plugin.name !== "gpt-image") {
+  fail("plugin.json name must be gpt-image");
 }
 if (plugin.version !== pkg.version) {
   fail("plugin.json version must match package.json");
@@ -400,7 +400,7 @@ if (
     type: "string",
     title: "OpenAI API key",
     description:
-      "API key used only by the local GPT Image 2 MCP server. Stored in Claude's sensitive plugin configuration.",
+      "API key used only by the local GPT Image MCP server. Stored in Claude's sensitive plugin configuration.",
     sensitive: true,
     required: false,
   })

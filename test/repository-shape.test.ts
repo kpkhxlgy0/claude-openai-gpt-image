@@ -23,7 +23,7 @@ test("repository root is the single marketplace plugin", async () => {
       name: p.name,
       source: p.source,
     })),
-    [{ name: "gpt-image-2", source: "./" }],
+    [{ name: "gpt-image", source: "./" }],
   );
 });
 

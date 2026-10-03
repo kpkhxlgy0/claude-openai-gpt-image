@@ -362,7 +362,7 @@ test("Git-index marketplace copy decodes WebP and serves free status without nod
     assert.equal(structured?.base_url_valid, true);
     assert.equal(
       structured?.default_relative_output_dir,
-      ".claude/generated-images/gpt-image-2",
+      ".claude/generated-images/gpt-image",
     );
     assert.deepEqual(structured?.workspace_roots, [await realpath(workspaceRoot)]);
 

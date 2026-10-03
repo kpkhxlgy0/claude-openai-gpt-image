@@ -1,5 +1,5 @@
 ---
-description: Check GPT Image 2 plugin configuration without making a paid image request
+description: Check GPT Image plugin configuration without making a paid image request
 ---
 
 Invoke only `get_status`, exactly once. Do not invoke any image-generation or image-editing tool as part of setup or diagnosis.
@@ -18,7 +18,7 @@ Report these returned fields without guessing or revealing configuration values:
 - `default_relative_output_dir`
 - model and server version
 
-If the API key is missing, direct the user to the interactive Claude Code TUI: run `/plugin`, open `Installed`, select `gpt-image-2`, and choose `Configure options`. The key belongs only in the sensitive **OpenAI API key** field. Never ask the user to paste or reveal it.
+If the API key is missing, direct the user to the interactive Claude Code TUI: run `/plugin`, open `Installed`, select `gpt-image`, and choose `Configure options`. The key belongs only in the sensitive **OpenAI API key** field. Never ask the user to paste or reveal it.
 
 If the Base URL is invalid, or the user expected a custom URL but `base_url_configured` is false, direct them to the same `Configure options` screen. Explain that the default is the official OpenAI Base URL and that a custom endpoint should usually include `/v1` because the plugin does not append it automatically.
 

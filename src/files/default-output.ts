@@ -4,7 +4,7 @@ import type { ImageFormat } from "../images/types.ts";
 
 export type RandomBytesSource = (size: number) => Uint8Array;
 
-const DEFAULT_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image-2";
+const DEFAULT_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image";
 const RANDOM_SUFFIX_BYTES = 4;
 
 function utcTimestamp(now: Date): string {

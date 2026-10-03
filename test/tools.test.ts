@@ -198,7 +198,7 @@ function makeOperations(
     snapshotInputs: snapshotter,
     publishOutput: publisher,
     makeDefaultOutputPath: () =>
-      ".claude/generated-images/gpt-image-2/default.png",
+      ".claude/generated-images/gpt-image/default.png",
     deferCleanup(task) {
       const timer = setTimeout(() => {
         void task().catch(() => undefined);
@@ -280,7 +280,7 @@ test("getStatus is free and exposes only approved non-secret status fields", asy
       base_url_valid: true,
       workspace_roots: roots.list().map((root) => root.canonicalPath),
       default_relative_output_dir:
-        ".claude/generated-images/gpt-image-2",
+        ".claude/generated-images/gpt-image",
       server_version: "0.1.0-test",
     });
     assert.equal(provider.generateRequests.length, 0);
@@ -494,7 +494,7 @@ test("generate uses a prompt-free default output path when none is supplied", as
       makeDefaultOutputPath(format) {
         defaultCalls += 1;
         assert.equal(format, "webp");
-        return ".claude/generated-images/gpt-image-2/fixed.webp";
+        return ".claude/generated-images/gpt-image/fixed.webp";
       },
       publishOutput: createPublisher({
         info: {
@@ -519,7 +519,7 @@ test("generate uses a prompt-free default output path when none is supplied", as
     assert.equal(defaultCalls, 1);
     assert.equal(
       result.relative_path,
-      ".claude/generated-images/gpt-image-2/fixed.webp",
+      ".claude/generated-images/gpt-image/fixed.webp",
     );
   });
 });

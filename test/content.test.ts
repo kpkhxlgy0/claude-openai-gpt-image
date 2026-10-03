@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const CONTENT_FILES = [
-  "skills/gpt-image-2/SKILL.md",
+  "skills/gpt-image/SKILL.md",
   "skills/gpt-image-result-handling/SKILL.md",
   "commands/setup.md",
   "README.md",
@@ -56,6 +56,10 @@ function assertIncludesAll(
   }
 }
 
+function countOccurrences(source: string, needle: string): number {
+  return source.split(needle).length - 1;
+}
+
 function assertMatchesAll(
   source: string,
   required: readonly RegExp[],
@@ -67,12 +71,12 @@ function assertMatchesAll(
 }
 
 test("Skills have valid bounded frontmatter and distinct invocation roles", async () => {
-  const primaryPath = "skills/gpt-image-2/SKILL.md";
+  const primaryPath = "skills/gpt-image/SKILL.md";
   const resultPath = "skills/gpt-image-result-handling/SKILL.md";
   const primary = parseFrontmatter(await text(primaryPath), primaryPath);
   const result = parseFrontmatter(await text(resultPath), resultPath);
 
-  assert.equal(primary.attributes.name, "gpt-image-2");
+  assert.equal(primary.attributes.name, "gpt-image");
   assert.equal(result.attributes.name, "gpt-image-result-handling");
   for (const [path, document] of [
     [primaryPath, primary],
@@ -96,7 +100,7 @@ test("Skills have valid bounded frontmatter and distinct invocation roles", asyn
 });
 
 test("primary Skill routes explicit image intent safely and accounts for cost", async () => {
-  const source = await text("skills/gpt-image-2/SKILL.md");
+  const source = await text("skills/gpt-image/SKILL.md");
   assertMatchesAll(
     source,
     [
@@ -144,7 +148,7 @@ test("primary Skill routes explicit image intent safely and accounts for cost", 
 
 test("primary Skill and both READMEs list every selectable model", async () => {
   const [primarySkill, english, chinese] = await Promise.all([
-    text("skills/gpt-image-2/SKILL.md"),
+    text("skills/gpt-image/SKILL.md"),
     text("README.md"),
     text("README.zh-CN.md"),
   ]);
@@ -176,7 +180,7 @@ test("primary Skill and both READMEs list every selectable model", async () => {
       "- `quality`: `auto`, `low`, `medium`, `high` (default), `xhigh`, or `max`; `xhigh` and `max` require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`",
       "- `background`: `auto` (default), `opaque`, or `transparent`",
       "`edit_image` accepts the same `model` and `background` inputs as `generate_image`.",
-      "the default output directory stays `.claude/generated-images/gpt-image-2` for every model.",
+      "the default output directory is `.claude/generated-images/gpt-image` for every model.",
       "The default model is `gpt-image-2.5-flare`.",
       "The default `quality` is `high`, which can cost more per call than the API default `auto`; set a lower `quality`, such as `medium` or `low`, explicitly to reduce cost.",
       "`gpt-image-2` rejects transparent backgrounds and `xhigh`/`max` quality locally with `INVALID_INPUT` before any paid call.",
@@ -190,7 +194,7 @@ test("primary Skill and both READMEs list every selectable model", async () => {
       "- `quality`：`auto`、`low`、`medium`、`high`（默认）、`xhigh` 或 `max`；`xhigh` 和 `max` 需要 `gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`",
       "- `background`：`auto`（默认）、`opaque` 或 `transparent`",
       "`edit_image` 接受与 `generate_image` 相同的 `model` 和 `background` 参数。",
-      "无论选择哪个模型，默认输出目录都保持为 `.claude/generated-images/gpt-image-2`。",
+      "无论选择哪个模型，默认输出目录都是 `.claude/generated-images/gpt-image`。",
       "默认模型是 `gpt-image-2.5-flare`。",
       "默认 `quality` 是 `high`，每次调用的费用可能高于 API 默认值 `auto`；如需降低费用，请显式设置较低的 `quality`，例如 `medium` 或 `low`。",
       "`gpt-image-2` 的透明背景和 `xhigh`/`max` 质量请求会在任何付费调用之前于本地以 `INVALID_INPUT` 被拒绝。",
@@ -275,7 +279,7 @@ test("setup command uses only get_status for diagnosis and makes no image reques
 test("configuration guidance uses the Claude Code TUI and reloads Desktop MCP configuration", async () => {
   const [setup, primarySkill, english, chinese] = await Promise.all([
     text("commands/setup.md"),
-    text("skills/gpt-image-2/SKILL.md"),
+    text("skills/gpt-image/SKILL.md"),
     text("README.md"),
     text("README.zh-CN.md"),
   ]);
@@ -288,8 +292,13 @@ test("configuration guidance uses the Claude Code TUI and reloads Desktop MCP co
   ] as const) {
     assertIncludesAll(
       source,
-      ["`/plugin`", "Installed", "`gpt-image-2`", "Configure options"],
+      ["`/plugin`", "Installed", "`gpt-image`", "Configure options"],
       `${label} configuration path`,
+    );
+    assert.doesNotMatch(
+      source,
+      /(?:[Ss]elect|选择) `gpt-image-2`(?:[.。,，]|$)|`Installed` → `gpt-image-2`/m,
+      `${label} must not route configuration to the old gpt-image-2 plugin name`,
     );
     assert.doesNotMatch(
       source,
@@ -337,7 +346,62 @@ test("configuration guidance uses the Claude Code TUI and reloads Desktop MCP co
   );
 });
 
-test("internal design docs record the supported configuration surface", async () => {
+test("user-facing docs use the gpt-image install identity and setup command", async () => {
+  const legacyInstall = "gpt-image-2@kpk-plugins";
+  const legacyUninstall = "claude plugin uninstall gpt-image-2@kpk-plugins";
+  const legacySetup = "/gpt-image-2:setup";
+  const entries = await Promise.all(
+    [
+      "README.md",
+      "README.zh-CN.md",
+      "skills/gpt-image/SKILL.md",
+      "commands/setup.md",
+    ].map(async (path) => [path, await text(path)] as const),
+  );
+
+  for (const [path, source] of entries) {
+    // Each README keeps exactly one legacy identity reference: the uninstall
+    // command in its upgrade subsection. Nothing else may use the old name.
+    const allowedLegacy = path.startsWith("README") ? 1 : 0;
+    assert.equal(
+      countOccurrences(source, legacyUninstall),
+      allowedLegacy,
+      `${path} must contain ${allowedLegacy} legacy uninstall command(s)`,
+    );
+    assert.equal(
+      countOccurrences(source, legacyInstall),
+      allowedLegacy,
+      `${path} may reference ${legacyInstall} only in the upgrade uninstall command`,
+    );
+    assert.equal(
+      countOccurrences(source, legacySetup),
+      0,
+      `${path} must not reference ${legacySetup}`,
+    );
+  }
+
+  const readmes = new Map(entries);
+  assertIncludesAll(
+    readmes.get("README.md") ?? "",
+    [
+      "### Upgrading from `gpt-image-2`",
+      "claude plugin install gpt-image@kpk-plugins --scope user",
+      "`/gpt-image:setup`",
+    ],
+    "README.md install identity",
+  );
+  assertIncludesAll(
+    readmes.get("README.zh-CN.md") ?? "",
+    [
+      "### 从 `gpt-image-2` 升级",
+      "claude plugin install gpt-image@kpk-plugins --scope user",
+      "`/gpt-image:setup`",
+    ],
+    "README.zh-CN.md install identity",
+  );
+});
+
+test("original design docs record the configuration surface they shipped with", async () => {
   const [design, implementationPlan] = await Promise.all([
     text("docs/superpowers/specs/2026-08-17-gpt-image-2-plugin-design.md"),
     text("docs/superpowers/plans/2026-08-17-gpt-image-2-plugin.md"),
@@ -378,14 +442,14 @@ test("English README documents supported GUI installation, runtime, safety, and 
       "project-specific",
       "Claude Code CLI installation is a secondary path.",
       "claude plugin marketplace add <repository-url-or-local-path>",
-      "claude plugin install gpt-image-2@kpk-plugins --scope user",
+      "claude plugin install gpt-image@kpk-plugins --scope user",
       "With `--scope user`, Claude Code installs and enables the plugin for the user across projects. `project` scope is shared through project settings, while `local` scope applies only to the current checkout.",
       "Installation and enablement scope do not grant tool permission or move sensitive configuration out of the plugin's sensitive settings.",
       "Node.js 20+",
       "https://api.openai.com/v1",
       "https://api.example.invalid/v1",
       "The only user-facing documentation example is:",
-      ".claude/generated-images/gpt-image-2",
+      "`.claude/generated-images/gpt-image`",
       "SIZE_MISMATCH",
       "TEMP_CLEANUP_PENDING",
       "SNAPSHOT_CLEANUP_PENDING",
@@ -459,14 +523,14 @@ test("Chinese README documents the same supported surface and exact key rule", a
       "项目级",
       "Claude Code CLI 安装是次要路径。",
       "claude plugin marketplace add <repository-url-or-local-path>",
-      "claude plugin install gpt-image-2@kpk-plugins --scope user",
+      "claude plugin install gpt-image@kpk-plugins --scope user",
       "使用 `--scope user` 时，Claude Code 会为该用户跨项目安装并启用插件；`project` scope 通过项目设置共享，`local` scope 只适用于当前 checkout。",
       "安装和启用 scope 不会授予工具权限，也不会把敏感配置移出插件的敏感设置。",
       "Node.js 20+",
       "https://api.openai.com/v1",
       "https://api.example.invalid/v1",
       "面向用户文档中唯一的自定义端点示例是：",
-      ".claude/generated-images/gpt-image-2",
+      "`.claude/generated-images/gpt-image`",
       "SIZE_MISMATCH",
       "TEMP_CLEANUP_PENDING",
       "SNAPSHOT_CLEANUP_PENDING",

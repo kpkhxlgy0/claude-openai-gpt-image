@@ -1,14 +1,14 @@
-# GPT Image 2 plugin for Claude Desktop Code
+# GPT Image plugin for Claude Desktop Code
 
-Generate and edit project images with OpenAI GPT Image 2 through a bundled local MCP server. The plugin writes one validated image per paid call, keeps files inside an approved project workspace, and never overwrites an existing destination.
+Generate and edit project images with OpenAI GPT Image models through a bundled local MCP server. The plugin writes one validated image per paid call, keeps files inside an approved project workspace, and never overwrites an existing destination.
 
 [简体中文](README.zh-CN.md)
 
 ## Quick start
 
-1. Install: `claude plugin marketplace add <repository-url-or-local-path>`, then `claude plugin install gpt-image-2@kpk-plugins --scope user` (or use **Settings → Plugins** in Claude Desktop Code).
-2. Configure the key: in an interactive Claude Code terminal run `/plugin` → `Installed` → `gpt-image-2` → `Configure options`, fill the sensitive **OpenAI API key** field, then restart Claude Desktop or start a new Desktop Local session.
-3. Try it: run `/gpt-image-2:setup` to confirm `api_key_configured: true`, then ask Claude to "generate a 1024x1024 PNG of a red apple icon" (one paid call); the file is saved under `.claude/generated-images/gpt-image-2/`.
+1. Install: `claude plugin marketplace add <repository-url-or-local-path>`, then `claude plugin install gpt-image@kpk-plugins --scope user` (or use **Settings → Plugins** in Claude Desktop Code).
+2. Configure the key: in an interactive Claude Code terminal run `/plugin` → `Installed` → `gpt-image` → `Configure options`, fill the sensitive **OpenAI API key** field, then restart Claude Desktop or start a new Desktop Local session.
+3. Try it: run `/gpt-image:setup` to confirm `api_key_configured: true`, then ask Claude to "generate a 1024x1024 PNG of a red apple icon" (one paid call); the file is saved under `.claude/generated-images/gpt-image/`.
 
 ## Supported Claude surface
 
@@ -20,7 +20,7 @@ GUI plugin installation is the primary path:
 
 1. Open the target project in Claude Desktop Code.
 2. Open the GUI **Settings → Plugins** area. Labels may vary slightly by Claude release.
-3. Add this repository root as a local marketplace or select its repository source, then install `gpt-image-2@kpk-plugins`.
+3. Add this repository root as a local marketplace or select its repository source, then install `gpt-image@kpk-plugins`.
 4. Enable the installed plugin for the current project. Enablement is project-specific; installing it does not grant access to every project automatically.
 5. Complete configuration from an interactive Claude Code TUI as described below. Do not copy `.mcp.json` into ordinary settings.
 
@@ -35,10 +35,24 @@ claude plugin marketplace add <repository-url-or-local-path>
 ```
 
 ```bash
-claude plugin install gpt-image-2@kpk-plugins --scope user
+claude plugin install gpt-image@kpk-plugins --scope user
 ```
 
 With `--scope user`, Claude Code installs and enables the plugin for the user across projects. `project` scope is shared through project settings, while `local` scope applies only to the current checkout. Installation and enablement scope do not grant tool permission or move sensitive configuration out of the plugin's sensitive settings.
+
+### Upgrading from `gpt-image-2`
+
+This plugin was renamed from `gpt-image-2` to `gpt-image`. If the `kpk-plugins` marketplace was added from a repository URL, refresh it first with `claude plugin marketplace update kpk-plugins`. Then uninstall the old plugin and install the new one:
+
+```bash
+claude plugin uninstall gpt-image-2@kpk-plugins
+```
+
+```bash
+claude plugin install gpt-image@kpk-plugins --scope user
+```
+
+Plugin settings are stored per plugin name, so re-enter the API key, and any custom Base URL, in `Configure options` for `gpt-image`. Then restart Claude Desktop or start a new Desktop Local session and run `/gpt-image:setup`. Images generated earlier stay under `.claude/generated-images/gpt-image-2`.
 
 ## Runtime requirement
 
@@ -54,7 +68,7 @@ Claude Desktop itself does not provide this configuration screen. From an intera
 
 1. Run `/plugin`.
 2. Open `Installed`.
-3. Select `gpt-image-2`.
+3. Select `gpt-image`.
 4. Choose `Configure options`.
 
 In `Configure options`, enter the API key in the sensitive **OpenAI API key** field. The manifest allows this field to remain empty so the MCP server can start and expose `tools/list` and the non-paid `get_status` tool. Generation and editing still require the key. A valid image request that passes input validation and reaches image-tool execution returns `CONFIG_MISSING` before any provider request when the key is absent. Do not put the key in a command line, `.env`, `.mcp.json`, ordinary settings, a README, a prompt, or a log, and do not ask Claude to display or inspect it.
@@ -77,7 +91,7 @@ The URL must be an absolute HTTP(S) URL without credentials, a query, a fragment
 
 HTTP is permitted for trusted local or private-network compatible endpoints, but it sends the API key, prompts, and edit images without transport encryption. Use an `http://` Base URL only on a network and endpoint you trust; prefer HTTPS otherwise.
 
-Run `/gpt-image-2:setup` after installation. The command calls only `get_status` and makes no provider request. If the MCP status tool is unavailable, does not return a real current-session result, reports an error, or omits required status metadata, setup stops; it does not fall back to Bash, file tools, agents, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC.
+Run `/gpt-image:setup` after installation. The command calls only `get_status` and makes no provider request. If the MCP status tool is unavailable, does not return a real current-session result, reports an error, or omits required status metadata, setup stops; it does not fall back to Bash, file tools, agents, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC.
 
 ## Tools
 
@@ -107,7 +121,7 @@ An optional mask must be a PNG with an alpha channel, match the first input imag
 
 ### Models, quality, and backgrounds
 
-The default model is `gpt-image-2.5-flare`. Results report the model actually used, and the default output directory stays `.claude/generated-images/gpt-image-2` for every model. Cost and output can differ by model.
+The default model is `gpt-image-2.5-flare`. Results report the model actually used, and the default output directory is `.claude/generated-images/gpt-image` for every model. Cost and output can differ by model.
 
 The default `quality` is `high`, which can cost more per call than the API default `auto`; set a lower `quality`, such as `medium` or `low`, explicitly to reduce cost. `xhigh` and `max` are higher-cost tiers supported only by `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`. `gpt-image-2` rejects transparent backgrounds and `xhigh`/`max` quality locally with `INVALID_INPUT` before any paid call.
 
@@ -119,7 +133,7 @@ Transparent output requires `background: "transparent"`, model `gpt-image-2.5-su
 - Preset sizes are `1024x1024`, `1536x1024` (landscape), and `1024x1536` (portrait). The tool default is `1024x1024`; `auto` is also accepted.
 - A custom `WIDTHxHEIGHT` must use multiples of 16, each edge must be at most 3840 pixels, aspect ratio must be between 1:3 and 3:1, and total pixels must be between 655,360 and 8,294,400.
 - PNG does not use output compression. JPEG and WebP accept compression values from 0 to 100.
-- If `output_path` is omitted, output goes under `.claude/generated-images/gpt-image-2` with a unique prompt-free filename, whichever model is selected.
+- If `output_path` is omitted, output goes under `.claude/generated-images/gpt-image` with a unique prompt-free filename, whichever model is selected.
 - Explicit output paths are preserved, must be relative to an approved workspace root, and must use an extension matching the requested format.
 - Existing destinations are rejected. No-overwrite publication also prevents concurrent calls from replacing the same target.
 
@@ -154,7 +168,7 @@ On Windows under Node 20, existing reparse-point/Junction escapes are rejected, 
 
 - **API key not configured:** follow the Claude Code TUI path above and populate the sensitive API-key field in `Configure options`. Do not paste the key into chat or a shell.
 - **Invalid or unused custom Base URL:** an invalid configured Base URL prevents the server from starting. Correct it in `Configure options`, confirm the setting was saved, then restart Claude Desktop or start a new Desktop Local session. Custom endpoints should usually end in `/v1`; no `/v1` segment is added automatically.
-- **Provider account eligibility:** complete any required organization verification in the provider account before using GPT Image 2. The plugin cannot bypass provider eligibility controls.
+- **Provider account eligibility:** complete any required organization verification in the provider account before using GPT Image models. The plugin cannot bypass provider eligibility controls.
 - **Provider throttling:** a rate limit response is returned as a failed paid call and is not retried automatically. Wait for provider capacity or account limits to recover before making a new deliberate request.
 - **MCP startup failure:** confirm Node.js 20+ is on the PATH visible to Claude Desktop Code, the plugin is enabled for the project, and the configured Base URL is valid. After correcting configuration, restart Claude Desktop or start a new Desktop Local session.
 - **No approved workspace root:** open the project in Claude Desktop Code and enable the plugin for that project.

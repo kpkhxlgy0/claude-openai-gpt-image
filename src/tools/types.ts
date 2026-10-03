@@ -30,7 +30,7 @@ import type {
 } from "../openai/types.ts";
 
 export const DEFAULT_RELATIVE_OUTPUT_DIRECTORY =
-  ".claude/generated-images/gpt-image-2" as const;
+  ".claude/generated-images/gpt-image" as const;
 export const INLINE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 
 export type ImageToolWarning =

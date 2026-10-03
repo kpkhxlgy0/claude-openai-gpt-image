@@ -198,6 +198,8 @@ test("initialize without an API key exposes exactly three correctly annotated to
       assert.ok(status);
       assert.ok(generate);
       assert.ok(edit);
+      assert.equal(protocol.client.getServerVersion()?.name, "gpt-image");
+      assert.equal(status.title, "Get GPT Image status");
       assert.equal(
         generate.description,
         "Generate one image with the selected GPT Image model (default gpt-image-2.5-flare) and publish it as a new file inside an approved workspace root.",
@@ -355,9 +357,13 @@ test("initialize without an API key exposes exactly three correctly annotated to
         base_url_configured: false,
         base_url_valid: true,
         workspace_roots: [await realpath(environmentRoot)],
-        default_relative_output_dir: ".claude/generated-images/gpt-image-2",
+        default_relative_output_dir: ".claude/generated-images/gpt-image",
         server_version: "0.1.0-test",
       });
+      assert.equal(
+        asRecord(asArray(statusResult.content)[0]).text,
+        "GPT Image status: API key not configured; 1 approved workspace root(s).",
+      );
       const statusSuccess = asArray(asRecord(status.outputSchema).oneOf)
         .map(asRecord)
         .find((branch) => "model" in asRecord(branch.properties));

@@ -14,8 +14,8 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = fileURLToPath(new URL("../..", import.meta.url));
-const smokePluginName = "gpt-image-2-host-smoke";
-const alternateSmokePluginName = "gpt-image-2-host-smoke-alternate";
+const smokePluginName = "gpt-image-host-smoke";
+const alternateSmokePluginName = "gpt-image-host-smoke-alternate";
 
 function copyCandidateIndex(targetRoot: string): void {
   const prefix = `${path.resolve(targetRoot).replaceAll("\\", "/")}/`;

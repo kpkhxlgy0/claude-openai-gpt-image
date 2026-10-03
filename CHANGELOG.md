@@ -6,13 +6,14 @@ All notable changes to this plugin are documented in this file.
 
 ### Added
 
-- Selectable `model` for `generate_image` and `edit_image`: `gpt-image-2`, `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare` (default). Image results report the model actually used, `get_status` reports the default model `gpt-image-2.5-flare`, and the default output directory remains `.claude/generated-images/gpt-image-2` for every model.
+- Selectable `model` for `generate_image` and `edit_image`: `gpt-image-2`, `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare` (default). Image results report the model actually used, `get_status` reports the default model `gpt-image-2.5-flare`, and the default output directory is `.claude/generated-images/gpt-image` for every model.
 - `quality` tiers `xhigh` and `max` for `generate_image` and `edit_image`, alongside `auto`, `low`, `medium`, and `high`. `xhigh` and `max` require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`; requests for them with `gpt-image-2` are rejected locally with `INVALID_INPUT` before any paid call.
 - `background` parameter for `generate_image` and `edit_image`: `auto` (default), `opaque`, or `transparent`. The default `auto` sends no `background` field to the provider.
 - Transparent backgrounds require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare` with PNG or WebP output. Because the API marks `gpt-image-2` transparency as preview, transparent requests for `gpt-image-2`, and transparent requests with JPEG output, are rejected locally with `INVALID_INPUT` before any paid call.
 
 ### Changed
 
+- The plugin is renamed from `gpt-image-2` to `gpt-image`. Install it as `gpt-image@kpk-plugins`; the setup command is now `/gpt-image:setup`, the primary Skill is now `gpt-image`, and the default output directory is now `.claude/generated-images/gpt-image`. Images generated earlier stay under `.claude/generated-images/gpt-image-2`. Existing installations must uninstall `gpt-image-2@kpk-plugins`, install `gpt-image@kpk-plugins`, and re-enter the API key in `Configure options`, because plugin settings are stored per plugin name.
 - The default model is now `gpt-image-2.5-flare` instead of `gpt-image-2`, and the default `quality` is now `high` instead of `auto`. Requests that omit `model` or `quality` therefore send `model: "gpt-image-2.5-flare"` and `quality: "high"` to the provider, which can cost more per call than the previous defaults; set `model` or a lower `quality` explicitly to change this.
 
 ### Verification scope

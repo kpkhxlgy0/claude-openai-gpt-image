@@ -45904,7 +45904,7 @@ var publishOutput = createOutputPublisher();
 // src/files/default-output.ts
 import { randomBytes as secureRandomBytes } from "node:crypto";
 import path5 from "node:path";
-var DEFAULT_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image-2";
+var DEFAULT_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image";
 var RANDOM_SUFFIX_BYTES = 4;
 function utcTimestamp(now) {
   const iso = now.toISOString();
@@ -46259,7 +46259,7 @@ var WorkspacePaths = class {
 };
 
 // src/tools/types.ts
-var DEFAULT_RELATIVE_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image-2";
+var DEFAULT_RELATIVE_OUTPUT_DIRECTORY = ".claude/generated-images/gpt-image";
 var INLINE_PREVIEW_MAX_BYTES = 2 * 1024 * 1024;
 function deferCleanup(task) {
   const timer = scheduleTimeout3(() => {
@@ -46439,7 +46439,7 @@ function toMcpSuccess(output) {
       content: [
         {
           type: "text",
-          text: `GPT Image 2 status: API key ${keyState}; ${output.workspace_roots.length} approved workspace root(s).`
+          text: `GPT Image status: API key ${keyState}; ${output.workspace_roots.length} approved workspace root(s).`
         }
       ],
       structuredContent: statusStructured(output)
@@ -46753,7 +46753,7 @@ var statusSuccessOutputSchema = external_exports.strictObject({
   base_url_valid: external_exports.boolean(),
   workspace_roots: external_exports.array(external_exports.string()),
   default_relative_output_dir: external_exports.literal(
-    ".claude/generated-images/gpt-image-2"
+    ".claude/generated-images/gpt-image"
   ),
   server_version: external_exports.string().min(1)
 });
@@ -46792,7 +46792,7 @@ var IMAGE_ANNOTATIONS = {
   idempotentHint: false,
   openWorldHint: true
 };
-var STATUS_TITLE = "Get GPT Image 2 status";
+var STATUS_TITLE = "Get GPT Image status";
 var STATUS_DESCRIPTION = "Report safe configuration and approved workspace-root status without making an image provider request.";
 var GENERATE_TITLE = "Generate an image";
 var GENERATE_DESCRIPTION = `Generate one image with the selected GPT Image model (default ${DEFAULT_IMAGE_MODEL}) and publish it as a new file inside an approved workspace root.`;
@@ -46864,7 +46864,7 @@ function createImageServer(dependencies) {
   const { context } = dependencies;
   const logger2 = dependencies.logger ?? createSafeLogger();
   const server = new McpServer({
-    name: "gpt-image-2",
+    name: "gpt-image",
     version: context.serverVersion
   });
   let synchronizationStarted = false;

@@ -505,11 +505,11 @@ test("makeDefaultOutputPath uses only UTC time, randomness, and format", () => {
   const now = new Date("2026-08-17T15:30:12.999Z");
   assert.equal(
     makeDefaultOutputPath("png", now, () => Buffer.from("a1b2c3d4", "hex")),
-    ".claude/generated-images/gpt-image-2/20260817-153012-a1b2c3d4.png",
+    ".claude/generated-images/gpt-image/20260817-153012-a1b2c3d4.png",
   );
   assert.equal(
     makeDefaultOutputPath("jpeg", now, () => Buffer.from("00112233", "hex")),
-    ".claude/generated-images/gpt-image-2/20260817-153012-00112233.jpeg",
+    ".claude/generated-images/gpt-image/20260817-153012-00112233.jpeg",
   );
   assert.notEqual(
     makeDefaultOutputPath("webp", now, () => Buffer.from("11111111", "hex")),

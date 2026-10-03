@@ -215,7 +215,7 @@ export function toMcpSuccess(output: ToolSuccessOutput): CallToolResult {
       content: [
         {
           type: "text",
-          text: `GPT Image 2 status: API key ${keyState}; ${output.workspace_roots.length} approved workspace root(s).`,
+          text: `GPT Image status: API key ${keyState}; ${output.workspace_roots.length} approved workspace root(s).`,
         },
       ],
       structuredContent: statusStructured(output),

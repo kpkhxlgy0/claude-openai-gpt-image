@@ -80,7 +80,7 @@ const statusSuccessOutputSchema = z.strictObject({
   base_url_valid: z.boolean(),
   workspace_roots: z.array(z.string()),
   default_relative_output_dir: z.literal(
-    ".claude/generated-images/gpt-image-2",
+    ".claude/generated-images/gpt-image",
   ),
   server_version: z.string().min(1),
 });
@@ -127,7 +127,7 @@ const IMAGE_ANNOTATIONS = {
   openWorldHint: true,
 } as const satisfies ToolAnnotations;
 
-const STATUS_TITLE = "Get GPT Image 2 status";
+const STATUS_TITLE = "Get GPT Image status";
 const STATUS_DESCRIPTION =
   "Report safe configuration and approved workspace-root status without making an image provider request.";
 const GENERATE_TITLE = "Generate an image";
@@ -229,7 +229,7 @@ export function createImageServer(
   const { context } = dependencies;
   const logger = dependencies.logger ?? createSafeLogger();
   const server = new McpServer({
-    name: "gpt-image-2",
+    name: "gpt-image",
     version: context.serverVersion,
   });
 

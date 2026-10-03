@@ -36,7 +36,7 @@ async function withTempRoots(
 
 test("assertPortableRelativePath accepts ordinary relative image paths", () => {
   assert.equal(assertPortableRelativePath("images/out.png"), undefined);
-  assert.equal(assertPortableRelativePath(".claude/generated-images/gpt-image-2/a.png"), undefined);
+  assert.equal(assertPortableRelativePath(".claude/generated-images/gpt-image/a.png"), undefined);
   assert.equal(assertPortableRelativePath("folder/sub/file.webp"), undefined);
 });
 
@@ -340,19 +340,19 @@ test("resolveOutput accepts relative paths only and rejects absolute outputs", a
   await withTempRoots(1, async (roots, _registry, paths) => {
     const root = roots[0]!;
     const resolved = await paths.resolveOutput(
-      ".claude/generated-images/gpt-image-2/out.png",
+      ".claude/generated-images/gpt-image/out.png",
     );
     assert.equal(
       resolved.relativePath.replaceAll("\\", "/"),
-      ".claude/generated-images/gpt-image-2/out.png",
+      ".claude/generated-images/gpt-image/out.png",
     );
     assert.equal(
       path.resolve(resolved.absolutePath),
-      path.resolve(root, ".claude/generated-images/gpt-image-2/out.png"),
+      path.resolve(root, ".claude/generated-images/gpt-image/out.png"),
     );
     assert.equal(
       path.resolve(resolved.parentPath),
-      path.resolve(root, ".claude/generated-images/gpt-image-2"),
+      path.resolve(root, ".claude/generated-images/gpt-image"),
     );
 
     await assert.rejects(

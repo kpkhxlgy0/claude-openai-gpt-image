@@ -1,14 +1,14 @@
-# Claude Desktop Code 的 GPT Image 2 插件
+# Claude Desktop Code 的 GPT Image 插件
 
-通过内置的本地 MCP server，在项目中使用 OpenAI GPT Image 2 生成或编辑图像。每次付费调用只写入一张经过验证的新图像，输出限制在已批准的项目工作区内，禁止覆盖现有目标。
+通过内置的本地 MCP server，在项目中使用 OpenAI GPT Image 模型生成或编辑图像。每次付费调用只写入一张经过验证的新图像，输出限制在已批准的项目工作区内，禁止覆盖现有目标。
 
 [English](README.md)
 
 ## 快速开始
 
-1. 安装：运行 `claude plugin marketplace add <repository-url-or-local-path>`，再运行 `claude plugin install gpt-image-2@kpk-plugins --scope user`（也可以在 Claude Desktop Code 的 **Settings → Plugins** 中安装）。
-2. 配置 Key：在交互式 Claude Code 终端运行 `/plugin` → `Installed` → `gpt-image-2` → `Configure options`，填写敏感字段 **OpenAI API key**，然后重启 Claude Desktop 或新建 Desktop Local 会话。
-3. 试一次：运行 `/gpt-image-2:setup` 确认 `api_key_configured: true`，然后让 Claude“生成一张 1024x1024 的红苹果图标 PNG”（一次付费调用）；文件保存在 `.claude/generated-images/gpt-image-2/` 下。
+1. 安装：运行 `claude plugin marketplace add <repository-url-or-local-path>`，再运行 `claude plugin install gpt-image@kpk-plugins --scope user`（也可以在 Claude Desktop Code 的 **Settings → Plugins** 中安装）。
+2. 配置 Key：在交互式 Claude Code 终端运行 `/plugin` → `Installed` → `gpt-image` → `Configure options`，填写敏感字段 **OpenAI API key**，然后重启 Claude Desktop 或新建 Desktop Local 会话。
+3. 试一次：运行 `/gpt-image:setup` 确认 `api_key_configured: true`，然后让 Claude“生成一张 1024x1024 的红苹果图标 PNG”（一次付费调用）；文件保存在 `.claude/generated-images/gpt-image/` 下。
 
 ## 支持的 Claude 使用界面
 
@@ -20,7 +20,7 @@ GUI 插件安装是首选方式：
 
 1. 在 Claude Desktop Code 中打开目标项目。
 2. 打开 GUI 的 **设置 → 插件** 页面；不同 Claude 版本的标签可能略有差异。
-3. 将本仓库根目录添加为本地 marketplace，或选择对应仓库来源，然后安装 `gpt-image-2@kpk-plugins`。
+3. 将本仓库根目录添加为本地 marketplace，或选择对应仓库来源，然后安装 `gpt-image@kpk-plugins`。
 4. 为当前项目启用该插件。插件启用是项目级的；安装后不会自动授权所有项目。
 5. 按下文说明，在交互式 Claude Code TUI 中完成配置。不要把 `.mcp.json` 复制到普通 settings。
 
@@ -35,10 +35,24 @@ claude plugin marketplace add <repository-url-or-local-path>
 ```
 
 ```bash
-claude plugin install gpt-image-2@kpk-plugins --scope user
+claude plugin install gpt-image@kpk-plugins --scope user
 ```
 
 使用 `--scope user` 时，Claude Code 会为该用户跨项目安装并启用插件；`project` scope 通过项目设置共享，`local` scope 只适用于当前 checkout。安装和启用 scope 不会授予工具权限，也不会把敏感配置移出插件的敏感设置。
+
+### 从 `gpt-image-2` 升级
+
+本插件已从 `gpt-image-2` 更名为 `gpt-image`。如果 `kpk-plugins` marketplace 是通过仓库 URL 添加的，请先运行 `claude plugin marketplace update kpk-plugins` 刷新。然后卸载旧插件并安装新插件：
+
+```bash
+claude plugin uninstall gpt-image-2@kpk-plugins
+```
+
+```bash
+claude plugin install gpt-image@kpk-plugins --scope user
+```
+
+插件设置按插件名称分别存储，因此需要在 `gpt-image` 的 `Configure options` 中重新填写 API Key 以及任何自定义 Base URL。然后重启 Claude Desktop 或新建 Desktop Local 会话，并运行 `/gpt-image:setup`。此前生成的图像仍保留在 `.claude/generated-images/gpt-image-2` 下。
 
 ## 运行时要求
 
@@ -54,7 +68,7 @@ Claude Desktop 本身不提供此配置界面。请在交互式 Claude Code 终�
 
 1. 运行 `/plugin`。
 2. 打开 `Installed`。
-3. 选择 `gpt-image-2`。
+3. 选择 `gpt-image`。
 4. 选择 `Configure options`。
 
 在 `Configure options` 中，将密钥填入敏感的 **OpenAI API Key** 字段。Manifest 允许该字段暂时留空，使 MCP server 仍可启动并暴露 `tools/list` 和非付费的 `get_status` 工具；生成和编辑仍然需要密钥。能够通过输入验证并进入图片工具执行的有效请求，会在任何服务商请求之前返回 `CONFIG_MISSING`。
@@ -79,7 +93,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 插件允许为受信任的本地或私有网络兼容端点使用 HTTP，但 `http://` 会在没有传输加密的情况下发送 API Key、prompt 和编辑输入图像。只有在信任该网络和端点时才使用 HTTP；其他情况应优先使用 HTTPS。
 
-安装后可运行 `/gpt-image-2:setup`。该命令只调用 `get_status`，不会发出服务商请求。如果 MCP 状态工具不可用、没有返回当前会话中的真实结果、报告错误或缺少必需状态元数据，setup 会停止；它不会改用 Bash、文件工具、Agent、本地脚本、直接 SDK/HTTP 调用或手写 JSON-RPC。
+安装后可运行 `/gpt-image:setup`。该命令只调用 `get_status`，不会发出服务商请求。如果 MCP 状态工具不可用、没有返回当前会话中的真实结果、报告错误或缺少必需状态元数据，setup 会停止；它不会改用 Bash、文件工具、Agent、本地脚本、直接 SDK/HTTP 调用或手写 JSON-RPC。
 
 ## 工具
 
@@ -109,7 +123,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ### 模型、质量与背景
 
-默认模型是 `gpt-image-2.5-flare`。结果会报告实际使用的模型；无论选择哪个模型，默认输出目录都保持为 `.claude/generated-images/gpt-image-2`。不同模型的费用和输出可能不同。
+默认模型是 `gpt-image-2.5-flare`。结果会报告实际使用的模型；无论选择哪个模型，默认输出目录都是 `.claude/generated-images/gpt-image`。不同模型的费用和输出可能不同。
 
 默认 `quality` 是 `high`，每次调用的费用可能高于 API 默认值 `auto`；如需降低费用，请显式设置较低的 `quality`，例如 `medium` 或 `low`。`xhigh` 和 `max` 是费用更高的档位，仅 `gpt-image-2.5-sunburst` 和 `gpt-image-2.5-flare` 支持。`gpt-image-2` 的透明背景和 `xhigh`/`max` 质量请求会在任何付费调用之前于本地以 `INVALID_INPUT` 被拒绝。
 
@@ -121,7 +135,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 - 预设尺寸包括 `1024x1024`、横向 `1536x1024` 和纵向 `1024x1536`。工具默认尺寸是 `1024x1024`，也接受 `auto`。
 - 自定义 `WIDTHxHEIGHT` 的宽高必须是 16 的倍数；单边最大 3840 像素；宽高比必须在 1:3 到 3:1 之间；总像素必须在 655,360 到 8,294,400 之间。
 - PNG 不使用输出压缩；JPEG 和 WebP 接受 0 到 100 的压缩值。
-- 未提供 `output_path` 时，无论选择哪个模型，文件都保存在 `.claude/generated-images/gpt-image-2` 下，并使用不含 prompt 的唯一文件名。
+- 未提供 `output_path` 时，无论选择哪个模型，文件都保存在 `.claude/generated-images/gpt-image` 下，并使用不含 prompt 的唯一文件名。
 - 显式输出路径会被保留，但必须是已批准工作区根目录内的相对路径，并使用与请求格式一致的扩展名。
 - 现有目标会被拒绝；无覆盖发布也会阻止并发调用替换同一目标。
 
@@ -156,7 +170,7 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 - **API Key 未配置：** 按上文 Claude Code TUI 路径，在 `Configure options` 中填写敏感 API Key 字段；不要把密钥粘贴到 chat 或 shell。
 - **自定义 Base URL 无效或未生效：** 无效的已配置 Base URL 会阻止 server 启动。请在 `Configure options` 中修正并确认已保存，然后重启 Claude Desktop 或新建 Desktop Local 会话。自定义端点通常应以 `/v1` 结尾，插件不会自动补全 `/v1`。
-- **服务商账户资格：** 使用 GPT Image 2 前，请在服务商账户中完成任何必需的组织验证；插件无法绕过服务商资格控制。
+- **服务商账户资格：** 使用 GPT Image 模型前，请在服务商账户中完成任何必需的组织验证；插件无法绕过服务商资格控制。
 - **服务商限流：** 速率限制响应会作为失败的付费调用返回，且不会自动重试。等待服务商容量或账户限额恢复后，再有意识地发起新请求。
 - **MCP 启动失败：** 确认 Claude Desktop Code 可见的 PATH 中有 Node.js 20+、插件已为当前项目启用，并且 Base URL 有效。修正配置后，重启 Claude Desktop 或新建 Desktop Local 会话。
 - **没有已批准工作区根目录：** 在 Claude Desktop Code 中打开项目，并为该项目启用插件。

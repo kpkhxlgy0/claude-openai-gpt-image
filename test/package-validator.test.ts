@@ -115,7 +115,7 @@ test("package validator rejects invalid candidate files staged only in the Git i
     const skillPath = path.join(
       fixtureRoot,
       "skills",
-      "gpt-image-2",
+      "gpt-image",
       "SKILL.md",
     );
     const safeSkill = await readFile(skillPath, "utf8");
@@ -124,7 +124,7 @@ test("package validator rejects invalid candidate files staged only in the Git i
       skillPath,
       `${safeSkill}\nOPENAI_API_KEY=${credentialShapedValue}\n`,
     );
-    runGit(fixtureRoot, ["add", "--", "skills/gpt-image-2/SKILL.md"], gitEnv);
+    runGit(fixtureRoot, ["add", "--", "skills/gpt-image/SKILL.md"], gitEnv);
     await writeFile(skillPath, safeSkill);
 
     const distPath = path.join(fixtureRoot, "dist", "server.mjs");
@@ -156,7 +156,7 @@ test("package validator rejects invalid candidate files staged only in the Git i
     );
     assert.match(
       output,
-      /tracked file contains a credential-shaped assignment: skills\/gpt-image-2\/SKILL\.md/,
+      /tracked file contains a credential-shaped assignment: skills\/gpt-image\/SKILL\.md/,
     );
     assert.match(output, /dist\/server\.mjs must pass node --check/);
   } finally {

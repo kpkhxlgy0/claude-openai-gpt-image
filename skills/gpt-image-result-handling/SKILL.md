@@ -1,6 +1,6 @@
 ---
 name: gpt-image-result-handling
-description: Internal guidance for reporting saved GPT Image 2 generation and editing results.
+description: Internal guidance for reporting saved GPT Image generation and editing results.
 user-invocable: false
 ---
 
