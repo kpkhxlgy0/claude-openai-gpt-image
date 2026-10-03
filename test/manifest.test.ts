@@ -18,7 +18,7 @@ test("API key is sensitive and MCP uses plugin substitutions", async () => {
 test("plugin identity and approved userConfig fields", async () => {
   const plugin = await json(".claude-plugin/plugin.json");
   assert.equal(plugin.name, "gpt-image");
-  assert.equal(plugin.version, "0.1.1");
+  assert.equal(plugin.version, "0.2.0");
   assert.equal(plugin.author.name, "KPK");
   assert.deepEqual(Object.keys(plugin.userConfig).sort(), [
     "openai_api_key",

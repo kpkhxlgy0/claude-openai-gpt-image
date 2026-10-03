@@ -1,6 +1,6 @@
 {
   "name": "gpt-image",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Generate and edit project images with OpenAI GPT Image models through a bundled local MCP server.",
   "author": {
     "name": "KPK"

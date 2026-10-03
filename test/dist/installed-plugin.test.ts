@@ -188,7 +188,7 @@ test("Git-index marketplace copy decodes WebP and serves free status without nod
         openai_api_key?: { sensitive?: unknown; required?: unknown };
       };
     };
-    assert.equal(plugin.version, "0.1.1");
+    assert.equal(plugin.version, "0.2.0");
     assert.equal(plugin.userConfig?.openai_api_key?.sensitive, true);
     assert.equal(plugin.userConfig?.openai_api_key?.required, false);
 
@@ -356,7 +356,7 @@ test("Git-index marketplace copy decodes WebP and serves free status without nod
     assert.equal(callResult?.isError, undefined);
     const structured = callResult?.structuredContent;
     assert.equal(structured?.model, "gpt-image-2.5-flare");
-    assert.equal(structured?.server_version, "0.1.1");
+    assert.equal(structured?.server_version, "0.2.0");
     assert.equal(structured?.api_key_configured, false);
     assert.equal(structured?.base_url_configured, false);
     assert.equal(structured?.base_url_valid, true);

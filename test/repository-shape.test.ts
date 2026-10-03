@@ -30,7 +30,7 @@ test("repository root is the single marketplace plugin", async () => {
 test("package scripts and engines match the scaffold contract", async () => {
   const pkg = await json("package.json");
   assert.equal(pkg.name, "claude-openai-gpt-image");
-  assert.equal(pkg.version, "0.1.1");
+  assert.equal(pkg.version, "0.2.0");
   assert.equal(pkg.private, true);
   assert.equal(pkg.type, "module");
   assert.equal(pkg.engines.node, ">=20");
@@ -74,12 +74,12 @@ test("release version is synchronized across source and package metadata", async
     readFile("src/index.ts", "utf8"),
   ]);
 
-  assert.equal(pkg.version, "0.1.1");
+  assert.equal(pkg.version, "0.2.0");
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages[""].version, pkg.version);
   assert.equal(plugin.version, pkg.version);
   assert.equal(marketplace.plugins[0].version, pkg.version);
-  assert.match(entrypoint, /const SERVER_VERSION = "0\.1\.1";/);
+  assert.match(entrypoint, /const SERVER_VERSION = "0\.2\.0";/);
 });
 
 test("production entry point delegates process tool-context wiring", async () => {

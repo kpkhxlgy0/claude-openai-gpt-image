@@ -7,7 +7,7 @@ import { OpenAIImageClient } from "./openai/openai-image-client.ts";
 import { createProcessToolContext } from "./process-context.ts";
 import { createImageServer } from "./server.ts";
 
-const SERVER_VERSION = "0.1.1";
+const SERVER_VERSION = "0.2.0";
 const logger = createSafeLogger();
 
 async function main(): Promise<void> {

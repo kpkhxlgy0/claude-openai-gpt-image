@@ -266,7 +266,7 @@ test("Git-index blobs are read by object ID even when a path resembles stage syn
   }
 });
 
-test("package validator binds every indexed manifest to release 0.1.1", async () => {
+test("package validator binds every indexed manifest to release 0.2.0", async () => {
   const fixtureRoot = await mkdtemp(
     path.join(tmpdir(), "gpt-image-validator-version-"),
   );
@@ -294,11 +294,11 @@ test("package validator binds every indexed manifest to release 0.1.1", async ()
     const lock = JSON.parse(await readFile(lockPath, "utf8"));
     const plugin = JSON.parse(await readFile(pluginPath, "utf8"));
     const marketplace = JSON.parse(await readFile(marketplacePath, "utf8"));
-    packageJson.version = "0.1.2";
-    lock.version = "0.1.2";
-    lock.packages[""].version = "0.1.2";
-    plugin.version = "0.1.2";
-    marketplace.plugins[0].version = "0.1.2";
+    packageJson.version = "0.2.1";
+    lock.version = "0.2.1";
+    lock.packages[""].version = "0.2.1";
+    plugin.version = "0.2.1";
+    marketplace.plugins[0].version = "0.2.1";
     await Promise.all([
       writeFile(packagePath, `${JSON.stringify(packageJson, null, 2)}\n`),
       writeFile(lockPath, `${JSON.stringify(lock, null, 2)}\n`),
@@ -336,9 +336,9 @@ test("package validator binds every indexed manifest to release 0.1.1", async ()
     assert.notEqual(
       result.status,
       0,
-      `validator accepted a release version other than 0.1.1:\n${output}`,
+      `validator accepted a release version other than 0.2.0:\n${output}`,
     );
-    assert.match(output, /package\.json version must be exactly 0\.1\.1/);
+    assert.match(output, /package\.json version must be exactly 0\.2\.0/);
   } finally {
     await rm(fixtureRoot, { recursive: true, force: true });
   }
