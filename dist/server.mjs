@@ -37006,8 +37006,14 @@ function createDefaultSDKClient(options) {
   const client = new OpenAI(options);
   return {
     images: {
-      generate: (body, requestOptions) => requestOptions === void 0 ? client.images.generate(body) : client.images.generate(body, requestOptions),
-      edit: (body, requestOptions) => requestOptions === void 0 ? client.images.edit(body) : client.images.edit(body, requestOptions)
+      generate: (body, requestOptions) => {
+        const sdkBody = body;
+        return requestOptions === void 0 ? client.images.generate(sdkBody) : client.images.generate(sdkBody, requestOptions);
+      },
+      edit: (body, requestOptions) => {
+        const sdkBody = body;
+        return requestOptions === void 0 ? client.images.edit(sdkBody) : client.images.edit(sdkBody, requestOptions);
+      }
     }
   };
 }
@@ -45356,9 +45362,19 @@ var IMAGE_MODELS = [
   "gpt-image-2.5-sunburst",
   "gpt-image-2.5-flare"
 ];
-var DEFAULT_IMAGE_MODEL = "gpt-image-2";
+var DEFAULT_IMAGE_MODEL = "gpt-image-2.5-flare";
 var IMAGE_BACKGROUNDS = ["auto", "opaque", "transparent"];
 var TRANSPARENT_BACKGROUND_MODELS = Object.freeze(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
+var IMAGE_QUALITIES = [
+  "auto",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max"
+];
+var DEFAULT_IMAGE_QUALITY = "high";
+var EXTENDED_QUALITY_MODELS = Object.freeze(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
 
 // src/schemas.ts
 var PROMPT_MAX = 32e3;
@@ -45423,7 +45439,7 @@ var sizeSchema = external_exports.string().superRefine((value, ctx) => {
 });
 var promptSchema = external_exports.string().transform((value) => value.trim()).pipe(external_exports.string().min(1).max(PROMPT_MAX));
 var modelSchema = external_exports.enum(IMAGE_MODELS).default(DEFAULT_IMAGE_MODEL);
-var qualitySchema = external_exports.enum(["auto", "low", "medium", "high"]).default("auto");
+var qualitySchema = external_exports.enum(IMAGE_QUALITIES).default(DEFAULT_IMAGE_QUALITY);
 var outputFormatSchema = external_exports.enum(["png", "jpeg", "webp"]).default("png");
 var backgroundSchema = external_exports.enum(IMAGE_BACKGROUNDS).default("auto");
 var moderationSchema = external_exports.enum(["auto", "low"]).default("auto");
@@ -45470,6 +45486,17 @@ function assertBackgroundRules(value) {
     );
   }
 }
+function assertQualityRules(value) {
+  if (value.quality !== "xhigh" && value.quality !== "max") {
+    return;
+  }
+  if (!EXTENDED_QUALITY_MODELS.includes(value.model)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      `quality "${value.quality}" requires model ${EXTENDED_QUALITY_MODELS.join(" or ")}`
+    );
+  }
+}
 var generateObjectSchema = external_exports.strictObject({
   prompt: promptSchema,
   model: modelSchema,
@@ -45499,11 +45526,13 @@ var statusSchema = external_exports.strictObject({});
 var generateImageSchema = external_exports.preprocess((input) => input, generateObjectSchema).transform((value) => {
   assertCompressionRules(value);
   assertBackgroundRules(value);
+  assertQualityRules(value);
   return normalizeCompression(value);
 });
 var editImageSchema = external_exports.preprocess((input) => input, editObjectSchema).transform((value) => {
   assertCompressionRules(value);
   assertBackgroundRules(value);
+  assertQualityRules(value);
   return normalizeCompression(value);
 });
 
@@ -46739,7 +46768,7 @@ var imageSuccessOutputSchema = external_exports.strictObject({
   format: external_exports.enum(["png", "jpeg", "webp"]),
   mime_type: external_exports.enum(["image/png", "image/jpeg", "image/webp"]),
   size_bytes: external_exports.number().int().nonnegative(),
-  quality: external_exports.enum(["auto", "low", "medium", "high"]),
+  quality: external_exports.enum(IMAGE_QUALITIES),
   preview_included: external_exports.boolean(),
   request_id: external_exports.string().max(128).regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/).optional(),
   usage: usageSchema.optional(),
@@ -46766,7 +46795,7 @@ var IMAGE_ANNOTATIONS = {
 var STATUS_TITLE = "Get GPT Image 2 status";
 var STATUS_DESCRIPTION = "Report safe configuration and approved workspace-root status without making an image provider request.";
 var GENERATE_TITLE = "Generate an image";
-var GENERATE_DESCRIPTION = "Generate one GPT Image image with the selected model (default gpt-image-2) and publish it as a new file inside an approved workspace root.";
+var GENERATE_DESCRIPTION = `Generate one image with the selected GPT Image model (default ${DEFAULT_IMAGE_MODEL}) and publish it as a new file inside an approved workspace root.`;
 var EDIT_TITLE = "Edit images";
 var EDIT_DESCRIPTION = "Edit one to eight workspace images and publish one new output file without modifying the inputs.";
 function errorCode(error51) {

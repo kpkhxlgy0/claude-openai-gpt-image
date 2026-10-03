@@ -274,7 +274,7 @@ test("getStatus is free and exposes only approved non-secret status fields", asy
       "workspace_roots",
     ]);
     assert.deepEqual(result, {
-      model: "gpt-image-2",
+      model: "gpt-image-2.5-flare",
       api_key_configured: true,
       base_url_configured: true,
       base_url_valid: true,

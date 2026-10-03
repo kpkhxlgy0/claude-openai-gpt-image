@@ -130,8 +130,9 @@ test("primary Skill routes explicit image intent safely and accounts for cost", 
       "A changed prompt, input image, mask, or output path requires new explicit authorization.",
       "For iterative editing, pass the previous successfully saved output as an edit input; do not assume a server-side edit session.",
       'Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `output_format` `png` or `webp`.',
-      "The default model `gpt-image-2` rejects transparent requests.",
-      "Never switch away from the default model `gpt-image-2`, or to a different model, without the user's explicit agreement; cost and output differ by model.",
+      "Model `gpt-image-2` rejects transparent backgrounds and `xhigh` or `max` quality.",
+      "Never switch away from the default model `gpt-image-2.5-flare`, or to a different model, without the user's explicit agreement; cost and output differ by model.",
+      "The default `quality` is `high`. `xhigh` and `max` are higher-cost tiers available only on `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`; use them only when the user explicitly requests them.",
       "Resolve material ambiguity about the prompt, inputs, model, background, format, size, and destination before calling a paid tool",
       "If a successful result reports `SIZE_MISMATCH`, preserve the saved result but clearly report both requested and actual dimensions.",
     ],
@@ -171,25 +172,44 @@ test("primary Skill and both READMEs list every selectable model", async () => {
   assertIncludesAll(
     english,
     [
-      "- `model`: `gpt-image-2` (default), `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare`",
+      "- `model`: `gpt-image-2`, `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare` (default)",
+      "- `quality`: `auto`, `low`, `medium`, `high` (default), `xhigh`, or `max`; `xhigh` and `max` require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`",
       "- `background`: `auto` (default), `opaque`, or `transparent`",
       "`edit_image` accepts the same `model` and `background` inputs as `generate_image`.",
       "the default output directory stays `.claude/generated-images/gpt-image-2` for every model.",
+      "The default model is `gpt-image-2.5-flare`.",
+      "The default `quality` is `high`, which can cost more per call than the API default `auto`; set a lower `quality`, such as `medium` or `low`, explicitly to reduce cost.",
+      "`gpt-image-2` rejects transparent backgrounds and `xhigh`/`max` quality locally with `INVALID_INPUT` before any paid call.",
     ],
     "README.md model and background parameters",
   );
   assertIncludesAll(
     chinese,
     [
-      "- `model`：`gpt-image-2`（默认）、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`",
+      "- `model`：`gpt-image-2`、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`（默认）",
+      "- `quality`：`auto`、`low`、`medium`、`high`（默认）、`xhigh` 或 `max`；`xhigh` 和 `max` 需要 `gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`",
       "- `background`：`auto`（默认）、`opaque` 或 `transparent`",
       "`edit_image` 接受与 `generate_image` 相同的 `model` 和 `background` 参数。",
       "无论选择哪个模型，默认输出目录都保持为 `.claude/generated-images/gpt-image-2`。",
+      "默认模型是 `gpt-image-2.5-flare`。",
+      "默认 `quality` 是 `high`，每次调用的费用可能高于 API 默认值 `auto`；如需降低费用，请显式设置较低的 `quality`，例如 `medium` 或 `low`。",
+      "`gpt-image-2` 的透明背景和 `xhigh`/`max` 质量请求会在任何付费调用之前于本地以 `INVALID_INPUT` 被拒绝。",
     ],
     "README.zh-CN.md model and background parameters",
   );
   assert.doesNotMatch(english, /Transparent output backgrounds are not supported/);
   assert.doesNotMatch(chinese, /透明输出背景不受支持/);
+  for (const [label, source] of [
+    ["primary Skill", primarySkill],
+    ["README.md", english],
+    ["README.zh-CN.md", chinese],
+  ] as const) {
+    assert.doesNotMatch(
+      source,
+      /`gpt-image-2` \(default\)|default (?:model )?(?:is )?\(?`gpt-image-2`|`gpt-image-2`（默认）|默认(?:模型)?(?:是|（)? ?`gpt-image-2`/,
+      `${label} must not describe gpt-image-2 as the default model`,
+    );
+  }
 });
 
 test("internal result Skill preserves returned image facts and warnings", async () => {

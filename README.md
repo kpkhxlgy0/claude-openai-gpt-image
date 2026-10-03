@@ -83,15 +83,15 @@ Run `/gpt-image-2:setup` after installation. The command calls only `get_status`
 
 ### `get_status`
 
-Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, the default model (`gpt-image-2`), server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it through `Configure options` in the Claude Code TUI, then restart Claude Desktop or start a new Desktop Local session. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
+Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, the default model (`gpt-image-2.5-flare`), server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it through `Configure options` in the Claude Code TUI, then restart Claude Desktop or start a new Desktop Local session. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
 
 ### `generate_image`
 
-Generates one image with the selected `model` (default `gpt-image-2`; `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare` can also be selected), fixed `n: 1`, and saves one new file. Main inputs are:
+Generates one image with the selected `model` (default `gpt-image-2.5-flare`; `gpt-image-2` and `gpt-image-2.5-sunburst` can also be selected), fixed `n: 1`, and saves one new file. Main inputs are:
 
 - `prompt`
-- `model`: `gpt-image-2` (default), `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare`
-- `quality`: `auto`, `low`, `medium`, or `high`
+- `model`: `gpt-image-2`, `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare` (default)
+- `quality`: `auto`, `low`, `medium`, `high` (default), `xhigh`, or `max`; `xhigh` and `max` require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`
 - `size`
 - `output_format`: `png`, `jpeg`, or `webp`
 - optional JPEG/WebP `output_compression` from 0 to 100
@@ -101,13 +101,15 @@ Generates one image with the selected `model` (default `gpt-image-2`; `gpt-image
 
 ### `edit_image`
 
-Edits one to eight edit inputs in the supplied order and saves one new image. Inputs may be PNG, JPEG, or WebP. The limit is 50 MiB per input and 200 MiB aggregate across all edit images plus the optional mask. `edit_image` accepts the same `model` and `background` inputs as `generate_image`.
+Edits one to eight edit inputs in the supplied order and saves one new image. Inputs may be PNG, JPEG, or WebP. The limit is 50 MiB per input and 200 MiB aggregate across all edit images plus the optional mask. `edit_image` accepts the same `model` and `background` inputs as `generate_image`. It also accepts the same `quality` values, default, and model restriction.
 
 An optional mask must be a PNG with an alpha channel, match the first input image's dimensions, and be less than 4 MiB. Mask alpha only identifies the edit region; it does not request a transparent output background.
 
-### Models and backgrounds
+### Models, quality, and backgrounds
 
-The default model is `gpt-image-2`. Results report the model actually used, and the default output directory stays `.claude/generated-images/gpt-image-2` for every model. Cost and output can differ by model.
+The default model is `gpt-image-2.5-flare`. Results report the model actually used, and the default output directory stays `.claude/generated-images/gpt-image-2` for every model. Cost and output can differ by model.
+
+The default `quality` is `high`, which can cost more per call than the API default `auto`; set a lower `quality`, such as `medium` or `low`, explicitly to reduce cost. `xhigh` and `max` are higher-cost tiers supported only by `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`. `gpt-image-2` rejects transparent backgrounds and `xhigh`/`max` quality locally with `INVALID_INPUT` before any paid call.
 
 Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `png` or `webp` output. The API marks transparent-background support for `gpt-image-2` as preview, so the plugin rejects transparent requests for `gpt-image-2` locally with `INVALID_INPUT` before any paid call. Transparent requests with `jpeg` output are rejected the same way. The default `background: "auto"` sends no background field to the provider.
 

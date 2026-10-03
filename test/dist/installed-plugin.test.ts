@@ -355,7 +355,7 @@ test("Git-index marketplace copy decodes WebP and serves free status without nod
       | undefined;
     assert.equal(callResult?.isError, undefined);
     const structured = callResult?.structuredContent;
-    assert.equal(structured?.model, "gpt-image-2");
+    assert.equal(structured?.model, "gpt-image-2.5-flare");
     assert.equal(structured?.server_version, "0.1.1");
     assert.equal(structured?.api_key_configured, false);
     assert.equal(structured?.base_url_configured, false);

@@ -198,6 +198,10 @@ test("initialize without an API key exposes exactly three correctly annotated to
       assert.ok(status);
       assert.ok(generate);
       assert.ok(edit);
+      assert.equal(
+        generate.description,
+        "Generate one image with the selected GPT Image model (default gpt-image-2.5-flare) and publish it as a new file inside an approved workspace root.",
+      );
 
       assert.equal(status.annotations?.readOnlyHint, true);
       assert.equal(status.annotations?.destructiveHint, false);
@@ -257,7 +261,17 @@ test("initialize without an API key exposes exactly three correctly annotated to
           "gpt-image-2.5-sunburst",
           "gpt-image-2.5-flare",
         ]);
-        assert.equal(model.default, "gpt-image-2");
+        assert.equal(model.default, "gpt-image-2.5-flare");
+        const quality = asRecord(properties.quality);
+        assert.deepEqual(asArray(quality.enum), [
+          "auto",
+          "low",
+          "medium",
+          "high",
+          "xhigh",
+          "max",
+        ]);
+        assert.equal(quality.default, "high");
         const background = asRecord(properties.background);
         assert.deepEqual(asArray(background.enum), [
           "auto",
@@ -313,6 +327,10 @@ test("initialize without an API key exposes exactly three correctly annotated to
           asArray(asRecord(asRecord(success.properties).model).enum),
           ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
         );
+        assert.deepEqual(
+          asArray(asRecord(asRecord(success.properties).quality).enum),
+          ["auto", "low", "medium", "high", "xhigh", "max"],
+        );
         const warningSchema = asRecord(
           asRecord(asRecord(success.properties).warnings).items,
         );
@@ -332,7 +350,7 @@ test("initialize without an API key exposes exactly three correctly annotated to
       });
       assert.equal(statusResult.isError, undefined);
       assert.deepEqual(statusResult.structuredContent, {
-        model: "gpt-image-2",
+        model: "gpt-image-2.5-flare",
         api_key_configured: false,
         base_url_configured: false,
         base_url_valid: true,
@@ -346,7 +364,7 @@ test("initialize without an API key exposes exactly three correctly annotated to
       assert.ok(statusSuccess);
       assert.equal(
         asRecord(asRecord(statusSuccess.properties).model).const,
-        "gpt-image-2",
+        "gpt-image-2.5-flare",
       );
     } finally {
       await protocol.close();
@@ -396,21 +414,57 @@ test("invalid inputs and missing configuration return stable sanitized structure
         ["generate_image", {}],
         ["edit_image", { image_paths: ["input.png"] }],
       ] as const) {
-        const transparentDefaultModel = await protocol.client.callTool({
+        const transparentGptImage2 = await protocol.client.callTool({
           name: toolName,
           arguments: {
             prompt: "valid prompt",
+            model: "gpt-image-2",
             background: "transparent",
             ...extraArguments,
           },
         });
-        assert.equal(transparentDefaultModel.isError, true);
-        assert.deepEqual(transparentDefaultModel.structuredContent, {
+        assert.equal(transparentGptImage2.isError, true);
+        assert.deepEqual(transparentGptImage2.structuredContent, {
           isError: true,
           code: "INVALID_INPUT",
           message:
             'INVALID_INPUT: background "transparent" requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare',
         });
+
+        for (const quality of ["xhigh", "max"] as const) {
+          const extendedQualityGptImage2 = await protocol.client.callTool({
+            name: toolName,
+            arguments: {
+              prompt: "valid prompt",
+              model: "gpt-image-2",
+              quality,
+              ...extraArguments,
+            },
+          });
+          assert.equal(extendedQualityGptImage2.isError, true);
+          assert.deepEqual(extendedQualityGptImage2.structuredContent, {
+            isError: true,
+            code: "INVALID_INPUT",
+            message: `INVALID_INPUT: quality "${quality}" requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare`,
+          });
+        }
+
+        // The default model accepts these values, so validation passes and the
+        // call stops at CONFIG_MISSING because this context has no provider.
+        const defaultModelExtended = await protocol.client.callTool({
+          name: toolName,
+          arguments: {
+            prompt: "valid prompt",
+            background: "transparent",
+            quality: "max",
+            ...extraArguments,
+          },
+        });
+        assert.equal(defaultModelExtended.isError, true);
+        assert.equal(
+          asRecord(defaultModelExtended.structuredContent).code,
+          "CONFIG_MISSING",
+        );
 
         const transparentJpeg = await protocol.client.callTool({
           name: toolName,

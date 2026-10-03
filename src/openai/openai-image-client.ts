@@ -28,8 +28,15 @@ import type {
 } from "./types.ts";
 
 export type OpenAIImagesResponse = ImagesResponse;
-export type OpenAIImageGenerateBody = ImageGenerateParamsNonStreaming;
-export type OpenAIImageEditBody = ImageEditParamsNonStreaming;
+export type OpenAIImageGenerateBody = Omit<
+  ImageGenerateParamsNonStreaming,
+  "quality"
+> & {
+  quality?: ImageGenerateParamsNonStreaming["quality"] | "xhigh" | "max";
+};
+export type OpenAIImageEditBody = Omit<ImageEditParamsNonStreaming, "quality"> & {
+  quality?: ImageEditParamsNonStreaming["quality"] | "xhigh" | "max";
+};
 
 export interface OpenAIImageWithResponse {
   readonly data: OpenAIImagesResponse;
@@ -110,14 +117,20 @@ function createDefaultSDKClient(
   const client = new OpenAI(options);
   return {
     images: {
-      generate: (body, requestOptions) =>
-        requestOptions === undefined
-          ? client.images.generate(body)
-          : client.images.generate(body, requestOptions),
-      edit: (body, requestOptions) =>
-        requestOptions === undefined
-          ? client.images.edit(body)
-          : client.images.edit(body, requestOptions),
+      generate: (body, requestOptions) => {
+        // SDK 6.49.0 predates the GPT Image 2.5 quality values xhigh and max.
+        const sdkBody = body as ImageGenerateParamsNonStreaming;
+        return requestOptions === undefined
+          ? client.images.generate(sdkBody)
+          : client.images.generate(sdkBody, requestOptions);
+      },
+      edit: (body, requestOptions) => {
+        // SDK 6.49.0 predates the GPT Image 2.5 quality values xhigh and max.
+        const sdkBody = body as ImageEditParamsNonStreaming;
+        return requestOptions === undefined
+          ? client.images.edit(sdkBody)
+          : client.images.edit(sdkBody, requestOptions);
+      },
     },
   };
 }

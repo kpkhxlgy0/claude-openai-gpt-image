@@ -16,8 +16,9 @@ Use this Skill only for explicit image generation intent or explicit image editi
 - Do not use Bash, Write, Agent, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC as a fallback.
 - Improve an underspecified visual prompt only enough to make it executable, while preserving every user constraint.
 - Put literal text that must appear in the image in quotation marks and require exact spelling.
-- Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `output_format` `png` or `webp`. The default model `gpt-image-2` rejects transparent requests. State that limitation before any paid call and use an opaque background only when it is consistent with the user's request.
-- Never switch away from the default model `gpt-image-2`, or to a different model, without the user's explicit agreement; cost and output differ by model.
+- Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `output_format` `png` or `webp`. Model `gpt-image-2` rejects transparent backgrounds and `xhigh` or `max` quality. State that limitation before any paid call and use an opaque background only when it is consistent with the user's request.
+- Never switch away from the default model `gpt-image-2.5-flare`, or to a different model, without the user's explicit agreement; cost and output differ by model.
+- The default `quality` is `high`. `xhigh` and `max` are higher-cost tiers available only on `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`; use them only when the user explicitly requests them.
 - Preserve a user-specified output path as `output_path`. Output paths must remain inside an approved workspace root.
 - When more than one approved workspace root is available, pass `workspace_root` to select one of those roots; the selector never grants access to a new root.
 - When the user does not request a safe output path, omit `output_path` so the tool uses its default project directory.

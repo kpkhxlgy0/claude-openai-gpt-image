@@ -3,7 +3,10 @@ import test from "node:test";
 import { AppError } from "../src/errors.ts";
 import {
   DEFAULT_IMAGE_MODEL,
+  DEFAULT_IMAGE_QUALITY,
+  EXTENDED_QUALITY_MODELS,
   IMAGE_MODELS,
+  IMAGE_QUALITIES,
   TRANSPARENT_BACKGROUND_MODELS,
 } from "../src/openai/types.ts";
 import {
@@ -39,11 +42,11 @@ test("generateImageSchema applies defaults and trims prompts", () => {
     prompt: "  a red cube  ",
   });
   assert.equal(parsed.prompt, "a red cube");
-  assert.equal(parsed.quality, "auto");
+  assert.equal(parsed.quality, "high");
   assert.equal(parsed.size, "1024x1024");
   assert.equal(parsed.output_format, "png");
   assert.equal(parsed.moderation, "auto");
-  assert.equal(parsed.model, "gpt-image-2");
+  assert.equal(parsed.model, "gpt-image-2.5-flare");
   assert.equal(parsed.background, "auto");
   assert.equal("output_compression" in parsed, false);
   assert.equal("output_path" in parsed, false);
@@ -55,16 +58,29 @@ test("model constants expose exactly the supported models and transparent allowl
     [...IMAGE_MODELS],
     ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
   );
-  assert.equal(DEFAULT_IMAGE_MODEL, "gpt-image-2");
+  assert.equal(DEFAULT_IMAGE_MODEL, "gpt-image-2.5-flare");
   assert.deepEqual(
     [...TRANSPARENT_BACKGROUND_MODELS],
     ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
   );
 });
 
+test("quality constants expose exactly the supported tiers, the default, and the extended allowlist", () => {
+  assert.deepEqual(
+    [...IMAGE_QUALITIES],
+    ["auto", "low", "medium", "high", "xhigh", "max"],
+  );
+  assert.equal(DEFAULT_IMAGE_QUALITY, "high");
+  assert.deepEqual(
+    [...EXTENDED_QUALITY_MODELS],
+    ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
+  );
+});
+
 test("generate and edit schemas default model and background and accept every supported model", () => {
   const edit = editImageSchema.parse(editBase);
-  assert.equal(edit.model, "gpt-image-2");
+  assert.equal(edit.model, "gpt-image-2.5-flare");
+  assert.equal(edit.quality, "high");
   assert.equal(edit.background, "auto");
 
   for (const model of [
@@ -175,22 +191,20 @@ test("transparent backgrounds are accepted only for GPT Image 2.5 models with PN
 test("transparent backgrounds are rejected for gpt-image-2 in every format", () => {
   const message =
     /^INVALID_INPUT: background "transparent" requires model gpt-image-2\.5-sunburst or gpt-image-2\.5-flare$/;
-  for (const model of [undefined, "gpt-image-2"] as const) {
-    for (const output_format of [undefined, "png", "jpeg", "webp"] as const) {
-      const fields = {
-        background: "transparent",
-        ...(model === undefined ? {} : { model }),
-        ...(output_format === undefined ? {} : { output_format }),
-      };
-      assertInvalidInput(
-        () => generateImageSchema.parse({ prompt: "ok", ...fields }),
-        message,
-      );
-      assertInvalidInput(
-        () => editImageSchema.parse({ ...editBase, ...fields }),
-        message,
-      );
-    }
+  for (const output_format of [undefined, "png", "jpeg", "webp"] as const) {
+    const fields = {
+      model: "gpt-image-2",
+      background: "transparent",
+      ...(output_format === undefined ? {} : { output_format }),
+    };
+    assertInvalidInput(
+      () => generateImageSchema.parse({ prompt: "ok", ...fields }),
+      message,
+    );
+    assertInvalidInput(
+      () => editImageSchema.parse({ ...editBase, ...fields }),
+      message,
+    );
   }
 
   const opaqueJpeg = generateImageSchema.parse({
@@ -207,6 +221,89 @@ test("transparent backgrounds are rejected for gpt-image-2 in every format", () 
     output_format: "jpeg",
   });
   assert.equal(opaqueJpegEdit.background, "opaque");
+});
+
+test("the default model accepts transparent PNG and WebP output", () => {
+  for (const output_format of [undefined, "png", "webp"] as const) {
+    const fields = {
+      background: "transparent",
+      ...(output_format === undefined ? {} : { output_format }),
+    };
+    const generated = generateImageSchema.parse({ prompt: "ok", ...fields });
+    assert.equal(generated.model, "gpt-image-2.5-flare");
+    assert.equal(generated.background, "transparent");
+    const edited = editImageSchema.parse({ ...editBase, ...fields });
+    assert.equal(edited.model, "gpt-image-2.5-flare");
+    assert.equal(edited.background, "transparent");
+  }
+});
+
+test("every quality tier is accepted on GPT Image 2.5 models, including the default model", () => {
+  for (const model of [
+    undefined,
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare",
+  ] as const) {
+    for (const quality of IMAGE_QUALITIES) {
+      const fields = { quality, ...(model === undefined ? {} : { model }) };
+      const generated = generateImageSchema.parse({ prompt: "ok", ...fields });
+      assert.equal(generated.model, model ?? "gpt-image-2.5-flare");
+      assert.equal(generated.quality, quality);
+      const edited = editImageSchema.parse({ ...editBase, ...fields });
+      assert.equal(edited.model, model ?? "gpt-image-2.5-flare");
+      assert.equal(edited.quality, quality);
+    }
+  }
+});
+
+test("xhigh and max quality are rejected for gpt-image-2 while standard tiers are accepted", () => {
+  for (const quality of ["xhigh", "max"] as const) {
+    const message = new RegExp(
+      `^INVALID_INPUT: quality "${quality}" requires model gpt-image-2\\.5-sunburst or gpt-image-2\\.5-flare$`,
+    );
+    assertInvalidInput(
+      () =>
+        generateImageSchema.parse({
+          prompt: "ok",
+          model: "gpt-image-2",
+          quality,
+        }),
+      message,
+    );
+    assertInvalidInput(
+      () =>
+        editImageSchema.parse({
+          ...editBase,
+          model: "gpt-image-2",
+          quality,
+        }),
+      message,
+    );
+  }
+
+  for (const quality of ["auto", "low", "medium", "high"] as const) {
+    assert.equal(
+      generateImageSchema.parse({ prompt: "ok", model: "gpt-image-2", quality })
+        .quality,
+      quality,
+    );
+    assert.equal(
+      editImageSchema.parse({ ...editBase, model: "gpt-image-2", quality })
+        .quality,
+      quality,
+    );
+  }
+});
+
+test("generate and edit schemas reject unknown quality values", () => {
+  for (const quality of ["standard", "hd", "ultra", "XHIGH", "Max", ""]) {
+    assertThrowsValidation(() =>
+      generateImageSchema.parse({ prompt: "ok", quality }),
+    );
+    assertThrowsValidation(() =>
+      editImageSchema.parse({ ...editBase, quality }),
+    );
+  }
 });
 
 test("generateImageSchema enforces prompt limits and rejects unknown fields", () => {

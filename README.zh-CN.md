@@ -85,15 +85,15 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ### `get_status`
 
-只返回安全状态：API Key 是否已配置、是否配置了自定义 Base URL、运行中 server 的活动 URL 所对应的 `base_url_valid: true`、已批准工作区根目录、默认模型（`gpt-image-2`）、server 版本和默认相对输出目录。无效的已配置 Base URL 会阻止 server 启动；请通过 Claude Code TUI 的 `Configure options` 修正，然后重启 Claude Desktop 或新建 Desktop Local 会话。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
+只返回安全状态：API Key 是否已配置、是否配置了自定义 Base URL、运行中 server 的活动 URL 所对应的 `base_url_valid: true`、已批准工作区根目录、默认模型（`gpt-image-2.5-flare`）、server 版本和默认相对输出目录。无效的已配置 Base URL 会阻止 server 启动；请通过 Claude Code TUI 的 `Configure options` 修正，然后重启 Claude Desktop 或新建 Desktop Local 会话。`get_status` 不会调用服务商或图像 API，也不会返回密钥或 Base URL 的值。
 
 ### `generate_image`
 
-使用所选 `model`（默认 `gpt-image-2`；也可选择 `gpt-image-2.5-sunburst` 和 `gpt-image-2.5-flare`）和固定 `n: 1` 生成一张图像，并保存为一个新文件。主要参数包括：
+使用所选 `model`（默认 `gpt-image-2.5-flare`；也可选择 `gpt-image-2` 和 `gpt-image-2.5-sunburst`）和固定 `n: 1` 生成一张图像，并保存为一个新文件。主要参数包括：
 
 - `prompt`
-- `model`：`gpt-image-2`（默认）、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`
-- `quality`：`auto`、`low`、`medium`、`high`
+- `model`：`gpt-image-2`、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`（默认）
+- `quality`：`auto`、`low`、`medium`、`high`（默认）、`xhigh` 或 `max`；`xhigh` 和 `max` 需要 `gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`
 - `size`
 - `output_format`：`png`、`jpeg`、`webp`
 - JPEG/WebP 可选 `output_compression`：0 到 100
@@ -103,13 +103,15 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 
 ### `edit_image`
 
-按给定顺序接收 1–8 张编辑输入图像，并保存一张新图像。输入支持 PNG、JPEG 和 WebP。每个输入最多 50 MiB；所有编辑图像与可选蒙版合计最多 200 MiB。`edit_image` 接受与 `generate_image` 相同的 `model` 和 `background` 参数。
+按给定顺序接收 1–8 张编辑输入图像，并保存一张新图像。输入支持 PNG、JPEG 和 WebP。每个输入最多 50 MiB；所有编辑图像与可选蒙版合计最多 200 MiB。`edit_image` 接受与 `generate_image` 相同的 `model` 和 `background` 参数。它也接受相同的 `quality` 取值、默认值和模型限制。
 
 可选蒙版必须是 PNG，必须包含 alpha 通道，尺寸必须匹配第一张输入图像，并且小于 4 MiB。蒙版 alpha 只用于标识编辑区域，并不请求透明输出背景。
 
-### 模型与背景
+### 模型、质量与背景
 
-默认模型是 `gpt-image-2`。结果会报告实际使用的模型；无论选择哪个模型，默认输出目录都保持为 `.claude/generated-images/gpt-image-2`。不同模型的费用和输出可能不同。
+默认模型是 `gpt-image-2.5-flare`。结果会报告实际使用的模型；无论选择哪个模型，默认输出目录都保持为 `.claude/generated-images/gpt-image-2`。不同模型的费用和输出可能不同。
+
+默认 `quality` 是 `high`，每次调用的费用可能高于 API 默认值 `auto`；如需降低费用，请显式设置较低的 `quality`，例如 `medium` 或 `low`。`xhigh` 和 `max` 是费用更高的档位，仅 `gpt-image-2.5-sunburst` 和 `gpt-image-2.5-flare` 支持。`gpt-image-2` 的透明背景和 `xhigh`/`max` 质量请求会在任何付费调用之前于本地以 `INVALID_INPUT` 被拒绝。
 
 透明输出需要 `background: "transparent"`、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare` 模型，以及 `png` 或 `webp` 输出格式。API 将 `gpt-image-2` 的透明背景支持标记为预览，因此插件会在任何付费调用之前于本地以 `INVALID_INPUT` 拒绝 `gpt-image-2` 的透明请求。使用 `jpeg` 输出的透明请求也会以同样方式被拒绝。默认的 `background: "auto"` 不会向服务商发送 background 字段。
 

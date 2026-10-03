@@ -2,11 +2,15 @@ import { z } from "zod";
 import { AppError } from "./errors.ts";
 import {
   DEFAULT_IMAGE_MODEL,
+  DEFAULT_IMAGE_QUALITY,
+  EXTENDED_QUALITY_MODELS,
   IMAGE_BACKGROUNDS,
   IMAGE_MODELS,
+  IMAGE_QUALITIES,
   TRANSPARENT_BACKGROUND_MODELS,
   type ProviderBackground,
   type ProviderModel,
+  type ProviderQuality,
 } from "./openai/types.ts";
 
 const PROMPT_MAX = 32_000;
@@ -24,7 +28,7 @@ export interface ImageSize {
 export interface GenerateImageInput {
   model: ProviderModel;
   prompt: string;
-  quality: "auto" | "low" | "medium" | "high";
+  quality: ProviderQuality;
   size: "auto" | `${number}x${number}`;
   output_format: "png" | "jpeg" | "webp";
   output_compression?: number;
@@ -112,7 +116,7 @@ const promptSchema = z
   .pipe(z.string().min(1).max(PROMPT_MAX));
 
 const modelSchema = z.enum(IMAGE_MODELS).default(DEFAULT_IMAGE_MODEL);
-const qualitySchema = z.enum(["auto", "low", "medium", "high"]).default("auto");
+const qualitySchema = z.enum(IMAGE_QUALITIES).default(DEFAULT_IMAGE_QUALITY);
 const outputFormatSchema = z.enum(["png", "jpeg", "webp"]).default("png");
 const backgroundSchema = z.enum(IMAGE_BACKGROUNDS).default("auto");
 const moderationSchema = z.enum(["auto", "low"]).default("auto");
@@ -182,6 +186,24 @@ function assertBackgroundRules(value: BackgroundFields): void {
   }
 }
 
+type QualityFields = {
+  model: ProviderModel;
+  quality: ProviderQuality;
+};
+
+function assertQualityRules(value: QualityFields): void {
+  if (value.quality !== "xhigh" && value.quality !== "max") {
+    return;
+  }
+
+  if (!EXTENDED_QUALITY_MODELS.includes(value.model)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      `quality "${value.quality}" requires model ${EXTENDED_QUALITY_MODELS.join(" or ")}`,
+    );
+  }
+}
+
 const generateObjectSchema = z.strictObject({
   prompt: promptSchema,
   model: modelSchema,
@@ -216,6 +238,7 @@ export const generateImageSchema = z
   .transform((value): GenerateImageInput => {
     assertCompressionRules(value);
     assertBackgroundRules(value);
+    assertQualityRules(value);
     return normalizeCompression(value) as GenerateImageInput;
   });
 
@@ -224,5 +247,6 @@ export const editImageSchema = z
   .transform((value): EditImageInput => {
     assertCompressionRules(value);
     assertBackgroundRules(value);
+    assertQualityRules(value);
     return normalizeCompression(value) as EditImageInput;
   });

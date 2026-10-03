@@ -21,6 +21,7 @@ import type {
   ProviderGenerateRequest,
   ProviderInputSnapshot,
 } from "../src/openai/types.ts";
+import { editImageSchema, generateImageSchema } from "../src/schemas.ts";
 
 interface FakeSDKState {
   readonly generateBodies: OpenAIImageGenerateBody[];
@@ -348,6 +349,78 @@ test("generate and edit pass the selected model and send only a non-auto backgro
   assert.equal("input_fidelity" in state.editBodies[0]!, false);
 });
 
+test("schema defaults reach the provider body as flare at high quality without a background", async () => {
+  const { client, state } = createClient();
+
+  await client.generate(generateImageSchema.parse({ prompt: "default request" }));
+  await withSnapshotFixture(async ({ first }) => {
+    await client.edit({
+      ...editImageSchema.parse({
+        prompt: "default edit",
+        image_paths: ["first.jpeg"],
+      }),
+      images: Object.freeze([first]),
+    });
+  });
+
+  assert.deepEqual(state.generateBodies, [
+    {
+      model: "gpt-image-2.5-flare",
+      n: 1,
+      prompt: "default request",
+      quality: "high",
+      size: "1024x1024",
+      output_format: "png",
+      moderation: "auto",
+    },
+  ]);
+  assert.equal("background" in state.generateBodies[0]!, false);
+  assert.equal(state.editBodies.length, 1);
+  const editBody = state.editBodies[0]!;
+  assert.equal(editBody.model, "gpt-image-2.5-flare");
+  assert.equal(editBody.quality, "high");
+  assert.equal(editBody.size, "1024x1024");
+  assert.equal(editBody.output_format, "png");
+  assert.equal("background" in editBody, false);
+  assert.equal("moderation" in editBody, false);
+});
+
+test("xhigh and max quality pass through to generate and edit bodies on GPT Image 2.5 models", async () => {
+  const { client, state } = createClient();
+  const cases = [
+    ["gpt-image-2.5-sunburst", "xhigh"],
+    ["gpt-image-2.5-sunburst", "max"],
+    ["gpt-image-2.5-flare", "xhigh"],
+    ["gpt-image-2.5-flare", "max"],
+  ] as const;
+
+  for (const [model, quality] of cases) {
+    await client.generate({ ...generateRequest, model, quality });
+  }
+  await withSnapshotFixture(async ({ first }) => {
+    for (const [model, quality] of cases) {
+      await client.edit({
+        model,
+        prompt: "edit at an extended quality",
+        quality,
+        size: "1024x1024",
+        output_format: "png",
+        background: "auto",
+        images: Object.freeze([first]),
+      });
+    }
+  });
+
+  assert.deepEqual(
+    state.generateBodies.map((body) => [body.model, body.quality]),
+    cases.map(([model, quality]) => [model, quality]),
+  );
+  assert.deepEqual(
+    state.editBodies.map((body) => [body.model, body.quality]),
+    cases.map(([model, quality]) => [model, quality]),
+  );
+});
+
 test("omits the SDK request-options argument when no signal is present", async () => {
   const { client, state } = createClient();
 
@@ -457,6 +530,67 @@ test("default SDK adapter preserves underlying method arity with and without a s
     assert.deepEqual(editArgumentCounts, [1, 2]);
     assert.deepEqual(generateSignals, [undefined, controller.signal]);
     assert.deepEqual(editSignals, [undefined, controller.signal]);
+  } finally {
+    prototype.generate = originalGenerate;
+    prototype.edit = originalEdit;
+  }
+});
+
+test("default SDK adapter forwards xhigh and max quality unchanged", async () => {
+  interface PatchedImagesPrototype {
+    generate(
+      ...args: [
+        body: OpenAIImageGenerateBody,
+        options?: OpenAIImageRequestOptions,
+      ]
+    ): OpenAIImageAPIPromise;
+    edit(
+      ...args: [body: OpenAIImageEditBody, options?: OpenAIImageRequestOptions]
+    ): OpenAIImageAPIPromise;
+  }
+
+  const prototype = Images.prototype as unknown as PatchedImagesPrototype;
+  const originalGenerate = prototype.generate;
+  const originalEdit = prototype.edit;
+  const generateQualities: unknown[] = [];
+  const editQualities: unknown[] = [];
+  const success = () =>
+    apiSuccess({ created: 1, data: [{ b64_json: "aW1hZ2U=" }] });
+
+  prototype.generate = (...args) => {
+    generateQualities.push(args[0].quality);
+    return success();
+  };
+  prototype.edit = (...args) => {
+    editQualities.push(args[0].quality);
+    return success();
+  };
+
+  try {
+    const client = new OpenAIImageClient({
+      apiKey: "test-key-default-adapter-quality",
+      baseURL: "https://provider.example.test/v1",
+    });
+
+    await client.generate({
+      ...generateRequest,
+      model: "gpt-image-2.5-flare",
+      quality: "xhigh",
+    });
+    await withSnapshotFixture(async ({ first }) => {
+      await client.edit({
+        model: "gpt-image-2.5-sunburst",
+        prompt: "exercise the default adapter quality",
+        quality: "max",
+        size: "1024x1024",
+        output_format: "png",
+        background: "auto",
+        images: Object.freeze([first]),
+      });
+    });
+
+    assert.deepEqual(generateQualities, ["xhigh"]);
+    assert.deepEqual(editQualities, ["max"]);
   } finally {
     prototype.generate = originalGenerate;
     prototype.edit = originalEdit;

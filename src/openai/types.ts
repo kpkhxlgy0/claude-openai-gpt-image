@@ -4,7 +4,8 @@ export const IMAGE_MODELS = [
   "gpt-image-2.5-flare",
 ] as const;
 export type ProviderModel = (typeof IMAGE_MODELS)[number];
-export const DEFAULT_IMAGE_MODEL = "gpt-image-2" as const satisfies ProviderModel;
+export const DEFAULT_IMAGE_MODEL =
+  "gpt-image-2.5-flare" as const satisfies ProviderModel;
 
 export const IMAGE_BACKGROUNDS = ["auto", "opaque", "transparent"] as const;
 export type ProviderBackground = (typeof IMAGE_BACKGROUNDS)[number];
@@ -15,7 +16,23 @@ export type ProviderBackground = (typeof IMAGE_BACKGROUNDS)[number];
 export const TRANSPARENT_BACKGROUND_MODELS: readonly ProviderModel[] =
   Object.freeze(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
 
-export type ProviderQuality = "auto" | "low" | "medium" | "high";
+export const IMAGE_QUALITIES = [
+  "auto",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+] as const;
+export type ProviderQuality = (typeof IMAGE_QUALITIES)[number];
+export const DEFAULT_IMAGE_QUALITY = "high" as const satisfies ProviderQuality;
+
+// The only models allowed to request the xhigh and max quality tiers. The API
+// documents these tiers only for the GPT Image 2.5 models, so gpt-image-2 is
+// rejected locally until it is added here.
+export const EXTENDED_QUALITY_MODELS: readonly ProviderModel[] =
+  Object.freeze(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
+
 export type ProviderSize = "auto" | `${number}x${number}`;
 export type ProviderOutputFormat = "png" | "jpeg" | "webp";
 export type ProviderModeration = "auto" | "low";
