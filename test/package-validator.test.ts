@@ -419,3 +419,79 @@ test("package validator rejects non-regular and unmerged Git-index entries", asy
     await rm(fixtureRoot, { recursive: true, force: true });
   }
 });
+
+test("package validator approves only the exact XML identifier literals on www.w3.org", async () => {
+  const fixtureRoot = await mkdtemp(
+    path.join(tmpdir(), "gpt-image-validator-identifiers-"),
+  );
+  const gitEnv = isolatedGitEnvironment();
+  const approvedIdentifiers = [
+    "http://www.w3.org/2000/svg",
+    "http://www.w3.org/1999/xlink",
+    "http://www.w3.org/1999/xhtml",
+    "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd",
+    "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd",
+  ];
+  const svgNamespace = approvedIdentifiers[0]!;
+  // Derived at runtime so this scanned file contains only approved literals.
+  const otherHostUrls = [
+    `${svgNamespace}/extension`,
+    new URL("/1998/Math/MathML", svgNamespace).href,
+    svgNamespace.replace("http:", "https:"),
+    svgNamespace.toUpperCase(),
+  ];
+
+  try {
+    await copyTrackedWorkingTree(fixtureRoot);
+    await writeFile(
+      path.join(fixtureRoot, "src", "identifier-literals.ts"),
+      approvedIdentifiers
+        .map((identifier, index) => `export const identifier${index} = "${identifier}";`)
+        .join("\n") + "\n",
+    );
+    for (const [index, url] of otherHostUrls.entries()) {
+      await writeFile(
+        path.join(fixtureRoot, "test", `other-w3-url-${index}.ts`),
+        `export const url = "${url}";\n`,
+      );
+    }
+    runGit(fixtureRoot, ["init", "--quiet"], gitEnv);
+    runGit(fixtureRoot, ["add", "--all", "--force", "--", "."], gitEnv);
+    await linkDevelopmentDependencies(fixtureRoot);
+
+    const result = spawnSync(
+      process.execPath,
+      ["scripts/validate-package.mjs"],
+      {
+        cwd: fixtureRoot,
+        env: gitEnv,
+        encoding: "utf8",
+        timeout: 120_000,
+      },
+    );
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+
+    assert.notEqual(result.status, 0, output);
+    for (const index of otherHostUrls.keys()) {
+      assert.match(
+        output,
+        new RegExp(`unapproved endpoint URL literal: test/other-w3-url-${index}\\.ts`),
+        `${otherHostUrls[index]} must be reported:\n${output}`,
+      );
+    }
+    for (const approvedFile of [
+      "src/identifier-literals.ts",
+      "src/images/svg.ts",
+      "test/helpers/image-fixtures.ts",
+      "test/svg-inspection.test.ts",
+      "test/package-validator.test.ts",
+    ]) {
+      assert.ok(
+        !output.includes(`unapproved endpoint URL literal: ${approvedFile}`),
+        `${approvedFile} must pass the endpoint scan:\n${output}`,
+      );
+    }
+  } finally {
+    await rm(fixtureRoot, { recursive: true, force: true });
+  }
+});

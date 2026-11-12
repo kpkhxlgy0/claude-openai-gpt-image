@@ -1,6 +1,6 @@
 import { randomBytes as secureRandomBytes } from "node:crypto";
 import path from "node:path";
-import type { ImageFormat } from "../images/types.ts";
+import type { OutputImageFormat } from "../images/types.ts";
 
 export type RandomBytesSource = (size: number) => Uint8Array;
 
@@ -13,7 +13,7 @@ function utcTimestamp(now: Date): string {
 }
 
 export function makeDefaultOutputPath(
-  format: ImageFormat,
+  format: OutputImageFormat,
   now: Date = new Date(),
   randomBytes: RandomBytesSource = secureRandomBytes,
 ): string {

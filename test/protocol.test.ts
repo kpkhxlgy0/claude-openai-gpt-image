@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -28,7 +35,7 @@ import type {
 import { createProcessToolContext } from "../src/process-context.ts";
 import { createImageServer } from "../src/server.ts";
 import type { ToolContext, ToolOperations } from "../src/tools/types.ts";
-import { makePng } from "./helpers/image-fixtures.ts";
+import { makeGif, makePng, makeSvg } from "./helpers/image-fixtures.ts";
 
 function asRecord(value: unknown): Record<string, unknown> {
   assert.equal(typeof value, "object");
@@ -202,7 +209,7 @@ test("initialize without an API key exposes exactly three correctly annotated to
       assert.equal(status.title, "Get GPT Image status");
       assert.equal(
         generate.description,
-        "Generate one image with the selected GPT Image model (default gpt-image-2.5-flare) and publish it as a new file inside an approved workspace root.",
+        "Generate one image with the selected GPT Image model (default gpt-image-2.6-flare) and publish it as a new file inside an approved workspace root.",
       );
 
       assert.equal(status.annotations?.readOnlyHint, true);
@@ -225,6 +232,9 @@ test("initialize without an API key exposes exactly three correctly annotated to
       const generateProperties = asRecord(generateInput.properties);
       assert.deepEqual(Object.keys(generateProperties).sort(), [
         "background",
+        "complexity",
+        "frame_count",
+        "frame_duration_ms",
         "model",
         "moderation",
         "output_compression",
@@ -242,7 +252,11 @@ test("initialize without an API key exposes exactly three correctly annotated to
       const editProperties = asRecord(editInput.properties);
       assert.deepEqual(Object.keys(editProperties).sort(), [
         "background",
+        "complexity",
+        "frame_count",
+        "frame_duration_ms",
         "image_paths",
+        "markup_path",
         "mask_path",
         "model",
         "output_compression",
@@ -255,6 +269,11 @@ test("initialize without an API key exposes exactly three correctly annotated to
       ]);
       assert.deepEqual(editInput.required, ["prompt", "image_paths"]);
       assert.equal(editInput.additionalProperties, false);
+      const markupPath = asRecord(editProperties.markup_path);
+      assert.equal(markupPath.type, "string");
+      assert.equal(markupPath.minLength, 1);
+      assert.equal("default" in markupPath, false);
+      assert.equal("markup_path" in generateProperties, false);
 
       for (const properties of [generateProperties, editProperties]) {
         const model = asRecord(properties.model);
@@ -262,8 +281,14 @@ test("initialize without an API key exposes exactly three correctly annotated to
           "gpt-image-2",
           "gpt-image-2.5-sunburst",
           "gpt-image-2.5-flare",
+          "gpt-image-2.6-sunburst",
+          "gpt-image-2.6-flare",
         ]);
-        assert.equal(model.default, "gpt-image-2.5-flare");
+        assert.equal(model.default, "gpt-image-2.6-flare");
+        const complexity = asRecord(properties.complexity);
+        assert.equal(complexity.type, "string");
+        assert.deepEqual(asArray(complexity.enum), ["low", "medium", "high"]);
+        assert.equal("default" in complexity, false);
         const quality = asRecord(properties.quality);
         assert.deepEqual(asArray(quality.enum), [
           "auto",
@@ -281,7 +306,39 @@ test("initialize without an API key exposes exactly three correctly annotated to
           "transparent",
         ]);
         assert.equal(background.default, "auto");
+        // The GIF size default is injected before validation, so the
+        // advertised default stays the raster default.
+        const size = asRecord(properties.size);
+        assert.equal(size.type, "string");
+        assert.equal(size.default, "1024x1024");
+        const frameCount = asRecord(properties.frame_count);
+        assert.equal(frameCount.type, "integer");
+        assert.equal(frameCount.minimum, 2);
+        assert.equal(frameCount.maximum, 16);
+        assert.equal("default" in frameCount, false);
+        const frameDuration = asRecord(properties.frame_duration_ms);
+        assert.equal(frameDuration.type, "integer");
+        assert.equal(frameDuration.minimum, 20);
+        assert.equal(frameDuration.maximum, 2000);
+        assert.equal("default" in frameDuration, false);
       }
+      const generateOutputFormat = asRecord(generateProperties.output_format);
+      assert.deepEqual(asArray(generateOutputFormat.enum), [
+        "png",
+        "jpeg",
+        "webp",
+        "gif",
+        "svg",
+      ]);
+      assert.equal(generateOutputFormat.default, "png");
+      const editOutputFormat = asRecord(editProperties.output_format);
+      assert.deepEqual(asArray(editOutputFormat.enum), [
+        "png",
+        "jpeg",
+        "webp",
+        "gif",
+      ]);
+      assert.equal(editOutputFormat.default, "png");
 
       const statusOutputSchema = JSON.stringify(status.outputSchema);
       assert.match(statusOutputSchema, /api_key_configured/);
@@ -327,12 +384,31 @@ test("initialize without an API key exposes exactly three correctly annotated to
         assert.ok(success);
         assert.deepEqual(
           asArray(asRecord(asRecord(success.properties).model).enum),
-          ["gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"],
+          [
+            "gpt-image-2",
+            "gpt-image-2.5-sunburst",
+            "gpt-image-2.5-flare",
+            "gpt-image-2.6-sunburst",
+            "gpt-image-2.6-flare",
+          ],
         );
         assert.deepEqual(
           asArray(asRecord(asRecord(success.properties).quality).enum),
           ["auto", "low", "medium", "high", "xhigh", "max"],
         );
+        assert.deepEqual(
+          asArray(asRecord(asRecord(success.properties).format).enum),
+          ["png", "jpeg", "webp", "gif", "svg"],
+        );
+        assert.deepEqual(
+          asArray(asRecord(asRecord(success.properties).mime_type).enum),
+          ["image/png", "image/jpeg", "image/webp", "image/gif", "image/svg+xml"],
+        );
+        const frameCountOutput = asRecord(
+          asRecord(success.properties).actual_frame_count,
+        );
+        assert.equal(frameCountOutput.type, "integer");
+        assert.equal(frameCountOutput.exclusiveMinimum, 0);
         const warningSchema = asRecord(
           asRecord(asRecord(success.properties).warnings).items,
         );
@@ -352,7 +428,7 @@ test("initialize without an API key exposes exactly three correctly annotated to
       });
       assert.equal(statusResult.isError, undefined);
       assert.deepEqual(statusResult.structuredContent, {
-        model: "gpt-image-2.5-flare",
+        model: "gpt-image-2.6-flare",
         api_key_configured: false,
         base_url_configured: false,
         base_url_valid: true,
@@ -370,7 +446,7 @@ test("initialize without an API key exposes exactly three correctly annotated to
       assert.ok(statusSuccess);
       assert.equal(
         asRecord(asRecord(statusSuccess.properties).model).const,
-        "gpt-image-2.5-flare",
+        "gpt-image-2.6-flare",
       );
     } finally {
       await protocol.close();
@@ -434,7 +510,7 @@ test("invalid inputs and missing configuration return stable sanitized structure
           isError: true,
           code: "INVALID_INPUT",
           message:
-            'INVALID_INPUT: background "transparent" requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare',
+            'INVALID_INPUT: background "transparent" requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare or gpt-image-2.6-sunburst or gpt-image-2.6-flare',
         });
 
         for (const quality of ["xhigh", "max"] as const) {
@@ -451,9 +527,45 @@ test("invalid inputs and missing configuration return stable sanitized structure
           assert.deepEqual(extendedQualityGptImage2.structuredContent, {
             isError: true,
             code: "INVALID_INPUT",
-            message: `INVALID_INPUT: quality "${quality}" requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare`,
+            message: `INVALID_INPUT: quality "${quality}" requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare or gpt-image-2.6-sunburst or gpt-image-2.6-flare`,
           });
         }
+
+        // No provider is configured here, so INVALID_INPUT proves the
+        // complexity rule fails before any provider call.
+        for (const model of ["gpt-image-2", "gpt-image-2.5-flare"] as const) {
+          const complexityNon26 = await protocol.client.callTool({
+            name: toolName,
+            arguments: {
+              prompt: "valid prompt",
+              model,
+              complexity: "medium",
+              ...extraArguments,
+            },
+          });
+          assert.equal(complexityNon26.isError, true);
+          assert.deepEqual(complexityNon26.structuredContent, {
+            isError: true,
+            code: "INVALID_INPUT",
+            message:
+              "INVALID_INPUT: complexity requires model gpt-image-2.6-sunburst or gpt-image-2.6-flare",
+          });
+        }
+
+        const unknownComplexity = await protocol.client.callTool({
+          name: toolName,
+          arguments: {
+            prompt: "valid prompt",
+            complexity: "extreme",
+            ...extraArguments,
+          },
+        });
+        assert.equal(unknownComplexity.isError, true);
+        assert.deepEqual(unknownComplexity.structuredContent, {
+          isError: true,
+          code: "INVALID_INPUT",
+          message: "INVALID_INPUT: Image tool input is invalid",
+        });
 
         // The default model accepts these values, so validation passes and the
         // call stops at CONFIG_MISSING because this context has no provider.
@@ -463,6 +575,7 @@ test("invalid inputs and missing configuration return stable sanitized structure
             prompt: "valid prompt",
             background: "transparent",
             quality: "max",
+            complexity: "low",
             ...extraArguments,
           },
         });
@@ -504,7 +617,176 @@ test("invalid inputs and missing configuration return stable sanitized structure
           code: "INVALID_INPUT",
           message: "INVALID_INPUT: Image tool input is invalid",
         });
+
+        // No provider is configured here, so INVALID_INPUT proves each GIF
+        // rule fails before any provider call, and CONFIG_MISSING proves a
+        // valid GIF request passes validation.
+        const gifStructuredErrors: readonly [
+          Record<string, unknown>,
+          string,
+        ][] = [
+          [
+            { model: "gpt-image-2.5-flare", output_format: "gif" },
+            'INVALID_INPUT: output_format "gif" requires model gpt-image-2.6-sunburst or gpt-image-2.6-flare',
+          ],
+          [
+            { frame_count: 4 },
+            'INVALID_INPUT: frame_count and frame_duration_ms require output_format "gif"',
+          ],
+          [
+            { output_format: "png", frame_duration_ms: 100 },
+            'INVALID_INPUT: frame_count and frame_duration_ms require output_format "gif"',
+          ],
+          [
+            { output_format: "gif", output_compression: 5 },
+            "INVALID_INPUT: output_compression is not supported for GIF except the ignored zero default",
+          ],
+          [
+            { output_format: "gif", background: "transparent" },
+            'INVALID_INPUT: background "transparent" requires output_format "png" or "webp"',
+          ],
+          [{ size: "100x100" }, "INVALID_INPUT: Image tool input is invalid"],
+          [
+            { output_format: "gif", size: "100x100" },
+            "INVALID_INPUT: Image tool input is invalid",
+          ],
+          [{ size: "256x256" }, "INVALID_INPUT: Image tool input is invalid"],
+          [
+            { output_format: "gif", frame_count: 17 },
+            "INVALID_INPUT: Image tool input is invalid",
+          ],
+        ];
+        for (const [fields, message] of gifStructuredErrors) {
+          const gifInvalid = await protocol.client.callTool({
+            name: toolName,
+            arguments: { prompt: "valid prompt", ...fields, ...extraArguments },
+          });
+          assert.equal(gifInvalid.isError, true);
+          assert.deepEqual(gifInvalid.structuredContent, {
+            isError: true,
+            code: "INVALID_INPUT",
+            message,
+          });
+        }
+
+        for (const fields of [
+          { output_format: "gif" },
+          {
+            output_format: "gif",
+            size: "256x256",
+            frame_count: 16,
+            frame_duration_ms: 20,
+            output_compression: 0,
+            complexity: "low",
+          },
+        ]) {
+          const validGif = await protocol.client.callTool({
+            name: toolName,
+            arguments: { prompt: "valid prompt", ...fields, ...extraArguments },
+          });
+          assert.equal(validGif.isError, true);
+          assert.equal(asRecord(validGif.structuredContent).code, "CONFIG_MISSING");
+        }
       }
+
+      for (const [fields, message] of [
+        [
+          { model: "gpt-image-2", output_format: "svg" },
+          'INVALID_INPUT: output_format "svg" requires model gpt-image-2.6-sunburst or gpt-image-2.6-flare',
+        ],
+        [
+          { output_format: "svg", output_compression: 30 },
+          "INVALID_INPUT: output_compression is not supported for SVG except the ignored zero default",
+        ],
+        [
+          { output_format: "svg", frame_count: 3 },
+          'INVALID_INPUT: frame_count and frame_duration_ms require output_format "gif"',
+        ],
+      ] as const) {
+        const svgInvalid = await protocol.client.callTool({
+          name: "generate_image",
+          arguments: { prompt: "valid prompt", ...fields },
+        });
+        assert.equal(svgInvalid.isError, true);
+        assert.deepEqual(svgInvalid.structuredContent, {
+          isError: true,
+          code: "INVALID_INPUT",
+          message,
+        });
+      }
+      const validSvg = await protocol.client.callTool({
+        name: "generate_image",
+        arguments: { prompt: "valid prompt", output_format: "svg" },
+      });
+      assert.equal(asRecord(validSvg.structuredContent).code, "CONFIG_MISSING");
+
+      const svgEdit = await protocol.client.callTool({
+        name: "edit_image",
+        arguments: {
+          prompt: "valid prompt",
+          image_paths: ["input.png"],
+          output_format: "svg",
+        },
+      });
+      assert.equal(svgEdit.isError, true);
+      assert.deepEqual(svgEdit.structuredContent, {
+        isError: true,
+        code: "INVALID_INPUT",
+        message: "INVALID_INPUT: Image tool input is invalid",
+      });
+
+      const gifMask = await protocol.client.callTool({
+        name: "edit_image",
+        arguments: {
+          prompt: "valid prompt",
+          image_paths: ["input.png"],
+          mask_path: "mask.png",
+          output_format: "gif",
+        },
+      });
+      assert.equal(gifMask.isError, true);
+      assert.deepEqual(gifMask.structuredContent, {
+        isError: true,
+        code: "INVALID_INPUT",
+        message:
+          'INVALID_INPUT: mask_path is not supported with output_format "gif"',
+      });
+
+      for (const [markupArguments, message] of [
+        [
+          { mask_path: "mask.png", markup_path: "markup.png" },
+          "INVALID_INPUT: markup_path cannot be combined with mask_path",
+        ],
+        [
+          { model: "gpt-image-2", markup_path: "markup.png" },
+          "INVALID_INPUT: markup_path requires model gpt-image-2.5-sunburst or gpt-image-2.5-flare or gpt-image-2.6-sunburst or gpt-image-2.6-flare",
+        ],
+      ] as const) {
+        const markupInvalid = await protocol.client.callTool({
+          name: "edit_image",
+          arguments: {
+            prompt: "valid prompt",
+            image_paths: ["input.png"],
+            ...markupArguments,
+          },
+        });
+        assert.equal(markupInvalid.isError, true);
+        assert.deepEqual(markupInvalid.structuredContent, {
+          isError: true,
+          code: "INVALID_INPUT",
+          message,
+        });
+      }
+      const validMarkup = await protocol.client.callTool({
+        name: "edit_image",
+        arguments: {
+          prompt: "valid prompt",
+          image_paths: ["input.png"],
+          markup_path: "markup.png",
+          output_format: "gif",
+        },
+      });
+      assert.equal(asRecord(validMarkup.structuredContent).code, "CONFIG_MISSING");
 
       for (const argumentsValue of [
         {},
@@ -669,6 +951,133 @@ test("MCP cancellation aborts the in-flight provider signal", async () => {
       await protocol.close();
     }
   });
+});
+
+// Drives one generate_image call through tools/call with an injected provider
+// that returns fixed bytes. listTools runs first so the SDK client checks the
+// structured result against the advertised output schema.
+async function callGenerateWithProvider(
+  base64: string,
+  toolArguments: Record<string, unknown>,
+): Promise<{
+  readonly requests: readonly ProviderGenerateRequest[];
+  readonly result: Awaited<ReturnType<Client["callTool"]>>;
+  readonly savedBytes: Buffer;
+}> {
+  let outcome:
+    | {
+        requests: readonly ProviderGenerateRequest[];
+        result: Awaited<ReturnType<Client["callTool"]>>;
+        savedBytes: Buffer;
+      }
+    | undefined;
+  await withTemporaryRoots(1, async ([environmentRoot]) => {
+    assert.ok(environmentRoot);
+    const roots = new WorkspaceRootRegistry();
+    await roots.replace([environmentRoot]);
+    const requests: ProviderGenerateRequest[] = [];
+    const provider: ImageProvider = {
+      async generate(request: ProviderGenerateRequest): Promise<ProviderImage> {
+        requests.push(request);
+        return { base64, requestId: "req_protocol_success" };
+      },
+      edit(): Promise<ProviderImage> {
+        throw new Error("edit is not used in this test");
+      },
+    };
+    const protocol = await connectProtocol({
+      context: {
+        ...makeContext(roots, {
+          apiKeyConfigured: true,
+          apiKey: "test-key-protocol-success",
+          baseUrl: "https://api.openai.com/v1",
+          baseUrlConfigured: false,
+          workspaceRoot: environmentRoot,
+        }),
+        provider,
+      },
+      environmentRoot,
+      logs: [],
+    });
+    try {
+      await protocol.client.listTools();
+      const result = await protocol.client.callTool({
+        name: "generate_image",
+        arguments: toolArguments,
+      });
+      const structured = asRecord(result.structuredContent);
+      const savedBytes = await readFile(String(structured.absolute_path));
+      outcome = { requests, result, savedBytes };
+    } finally {
+      await protocol.close();
+    }
+  });
+  assert.ok(outcome);
+  return outcome;
+}
+
+test("a GIF generate_image call without a size sends auto through tools/call and returns a GIF preview", async () => {
+  const gif = makeGif({ width: 16, height: 16, frames: 3 });
+  const gifBase64 = gif.toString("base64");
+  const { requests, result, savedBytes } = await callGenerateWithProvider(
+    gifBase64,
+    { prompt: "animate a bouncing ball", output_format: "gif" },
+  );
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]!.size, "auto");
+  assert.equal(requests[0]!.output_format, "gif");
+  assert.notEqual(result.isError, true);
+  const structured = asRecord(result.structuredContent);
+  assert.equal(structured.format, "gif");
+  assert.equal(structured.mime_type, "image/gif");
+  assert.equal(structured.actual_frame_count, 3);
+  assert.equal(structured.requested_size, "auto");
+  assert.equal(structured.preview_included, true);
+  assert.deepEqual(structured.warnings, []);
+  assert.match(
+    String(structured.relative_path),
+    /^\.claude\/generated-images\/gpt-image\/[^/]+\.gif$/,
+  );
+  assert.deepEqual(savedBytes, gif);
+
+  const content = asArray(result.content).map(asRecord);
+  assert.equal(content.length, 2);
+  assert.equal(content[0]!.type, "text");
+  assert.match(String(content[0]!.text), / \(16x16, gif, 3 frames, \d+ bytes\)\.$/);
+  assert.deepEqual(content[1], {
+    type: "image",
+    data: gifBase64,
+    mimeType: "image/gif",
+  });
+});
+
+test("an SVG generate_image call returns one text block, no preview, and no SIZE_MISMATCH through tools/call", async () => {
+  const svg = makeSvg();
+  const { requests, result, savedBytes } = await callGenerateWithProvider(
+    svg.toString("base64"),
+    { prompt: "draw a vector badge", output_format: "svg" },
+  );
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0]!.output_format, "svg");
+  assert.notEqual(result.isError, true);
+  const structured = asRecord(result.structuredContent);
+  assert.equal(structured.format, "svg");
+  assert.equal(structured.mime_type, "image/svg+xml");
+  assert.equal(structured.preview_included, false);
+  assert.equal("actual_frame_count" in structured, false);
+  assert.deepEqual(structured.warnings, []);
+  assert.match(
+    String(structured.relative_path),
+    /^\.claude\/generated-images\/gpt-image\/[^/]+\.svg$/,
+  );
+  assert.deepEqual(savedBytes, svg);
+
+  const content = asArray(result.content).map(asRecord);
+  assert.equal(content.length, 1);
+  assert.equal(content[0]!.type, "text");
+  assert.equal(String(content[0]!.text).includes("SIZE_MISMATCH"), false);
 });
 
 test("production paid-call queue enforces its bound, cancellation, and mixed FIFO order", async () => {

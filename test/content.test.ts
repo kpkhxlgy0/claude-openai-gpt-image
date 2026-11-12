@@ -131,12 +131,27 @@ test("primary Skill routes explicit image intent safely and accounts for cost", 
       "Every paid image call requires a new explicit user instruction for that call.",
       "A prior instruction to keep improving automatically, work unattended, or choose parameters does not authorize another paid call after a success.",
       "After a successful paid call, stop and report the result.",
-      "A changed prompt, input image, mask, or output path requires new explicit authorization.",
+      "A changed prompt, input image, mask, markup layer, or output path requires new explicit authorization.",
       "For iterative editing, pass the previous successfully saved output as an edit input; do not assume a server-side edit session.",
-      'Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `output_format` `png` or `webp`.',
+      'Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare`, and `output_format` `png` or `webp`.',
       "Model `gpt-image-2` rejects transparent backgrounds and `xhigh` or `max` quality.",
-      "Never switch away from the default model `gpt-image-2.5-flare`, or to a different model, without the user's explicit agreement; cost and output differ by model.",
-      "The default `quality` is `high`. `xhigh` and `max` are higher-cost tiers available only on `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`; use them only when the user explicitly requests them.",
+      "Never switch away from the default model `gpt-image-2.6-flare`, or to a different model, without the user's explicit agreement; cost and output differ by model.",
+      "Requests to the 2.6 models, including calls that omit `model`, are billed at the GPT Image 2.6 rates.",
+      "The default `quality` is `high`. `xhigh` and `max` are higher-cost tiers available only on `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, and `gpt-image-2.6-flare`; use them only when the user explicitly requests them.",
+      "Pass `complexity` (`low`, `medium`, or `high`) only when the user asks for a complexity level. It requires `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`; when it is omitted, the model default `high` applies. It is separate from `quality` and never replaces it.",
+      'For SVG (vector) output, call `generate_image` with `output_format: "svg"` and `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`.',
+      "`edit_image` cannot output SVG, and SVG and GIF files cannot be edit inputs.",
+      "SVG output is billed for both the reference image and the SVG authoring tokens and has no inline preview.",
+      "an SVG containing scripts, external references, or embedded raster images is rejected with `INVALID_PROVIDER_RESPONSE` and nothing is saved.",
+      'For an animation, use `output_format: "gif"` with `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare` on either tool.',
+      "`frame_count` (integer 2–16; API default 9) and `frame_duration_ms` (integer 20–2000; API default 200) are optional and only valid with GIF output.",
+      "When `size` is omitted, the plugin sends `auto`; set it only when the user specifies one.",
+      "An explicit GIF size describes one frame and must be `WIDTHxHEIGHT` in multiples of 16 with edges up to 3840 pixels.",
+      "GIF takes no `output_compression`, no transparent background, and no `mask_path`.",
+      "For a markup-guided edit, pass the annotation layer as `markup_path` to `edit_image`.",
+      "It must be a PNG with an alpha channel (a transparent annotation layer) whose dimensions match the first input image; the transposed dimensions are also accepted when the first image is a JPEG or WebP.",
+      "It requires `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` and cannot be combined with `mask_path`.",
+      'In the prompt, describe the change, refer to the annotation (for example "inside the red circle"), and ask for the annotation to be removed from the result.',
       "Resolve material ambiguity about the prompt, inputs, model, background, format, size, and destination before calling a paid tool",
       "If a successful result reports `SIZE_MISMATCH`, preserve the saved result but clearly report both requested and actual dimensions.",
     ],
@@ -159,8 +174,24 @@ test("primary Skill and both READMEs list every selectable model", async () => {
   ] as const) {
     assertIncludesAll(
       source,
-      ["`gpt-image-2`", "`gpt-image-2.5-sunburst`", "`gpt-image-2.5-flare`"],
+      [
+        "`gpt-image-2`",
+        "`gpt-image-2.5-sunburst`",
+        "`gpt-image-2.5-flare`",
+        "`gpt-image-2.6-sunburst`",
+        "`gpt-image-2.6-flare`",
+      ],
       `${label} model list`,
+    );
+    assertIncludesAll(
+      source,
+      [
+        "`complexity`",
+        "`frame_count`",
+        "`frame_duration_ms`",
+        "`markup_path`",
+      ],
+      `${label} GPT Image 2.6 parameters`,
     );
   }
   for (const [label, source] of [
@@ -176,12 +207,16 @@ test("primary Skill and both READMEs list every selectable model", async () => {
   assertIncludesAll(
     english,
     [
-      "- `model`: `gpt-image-2`, `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare` (default)",
-      "- `quality`: `auto`, `low`, `medium`, `high` (default), `xhigh`, or `max`; `xhigh` and `max` require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`",
+      "- `model`: `gpt-image-2`, `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` (default)",
+      "- `quality`: `auto`, `low`, `medium`, `high` (default), `xhigh`, or `max`; `xhigh` and `max` require `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare`",
+      "- `output_format`: `png` (default), `jpeg`, `webp`, `gif` (animated), or `svg`; `gif` and `svg` require `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`",
       "- `background`: `auto` (default), `opaque`, or `transparent`",
+      "- optional `complexity`: `low`, `medium`, or `high`; requires `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`",
+      "- optional GIF `frame_count` (2 to 16) and `frame_duration_ms` (20 to 2000)",
       "`edit_image` accepts the same `model` and `background` inputs as `generate_image`.",
       "the default output directory is `.claude/generated-images/gpt-image` for every model.",
-      "The default model is `gpt-image-2.5-flare`.",
+      "The default model is `gpt-image-2.6-flare`.",
+      "Requests to `gpt-image-2.6-sunburst` and `gpt-image-2.6-flare` are billed at the GPT Image 2.6 rates. Because the default model is now `gpt-image-2.6-flare`, calls that do not set `model` are billed at those rates too, which changes their cost; set `model` explicitly to use a different model.",
       "The default `quality` is `high`, which can cost more per call than the API default `auto`; set a lower `quality`, such as `medium` or `low`, explicitly to reduce cost.",
       "`gpt-image-2` rejects transparent backgrounds and `xhigh`/`max` quality locally with `INVALID_INPUT` before any paid call.",
     ],
@@ -190,12 +225,16 @@ test("primary Skill and both READMEs list every selectable model", async () => {
   assertIncludesAll(
     chinese,
     [
-      "- `model`：`gpt-image-2`、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`（默认）",
-      "- `quality`：`auto`、`low`、`medium`、`high`（默认）、`xhigh` 或 `max`；`xhigh` 和 `max` 需要 `gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare`",
+      "- `model`：`gpt-image-2`、`gpt-image-2.5-sunburst`、`gpt-image-2.5-flare`、`gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare`（默认）",
+      "- `quality`：`auto`、`low`、`medium`、`high`（默认）、`xhigh` 或 `max`；`xhigh` 和 `max` 需要 `gpt-image-2.5-sunburst`、`gpt-image-2.5-flare`、`gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare`",
+      "- `output_format`：`png`（默认）、`jpeg`、`webp`、`gif`（动图）或 `svg`；`gif` 和 `svg` 需要 `gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare`",
       "- `background`：`auto`（默认）、`opaque` 或 `transparent`",
+      "- 可选 `complexity`：`low`、`medium` 或 `high`；需要 `gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare`",
+      "- GIF 可选 `frame_count`（2 到 16）和 `frame_duration_ms`（20 到 2000）",
       "`edit_image` 接受与 `generate_image` 相同的 `model` 和 `background` 参数。",
       "无论选择哪个模型，默认输出目录都是 `.claude/generated-images/gpt-image`。",
-      "默认模型是 `gpt-image-2.5-flare`。",
+      "默认模型是 `gpt-image-2.6-flare`。",
+      "`gpt-image-2.6-sunburst` 和 `gpt-image-2.6-flare` 的请求按 GPT Image 2.6 费率计费。由于默认模型现在是 `gpt-image-2.6-flare`，未设置 `model` 的调用也按该费率计费，费用会随之变化；如需使用其他模型，请显式设置 `model`。",
       "默认 `quality` 是 `high`，每次调用的费用可能高于 API 默认值 `auto`；如需降低费用，请显式设置较低的 `quality`，例如 `medium` 或 `low`。",
       "`gpt-image-2` 的透明背景和 `xhigh`/`max` 质量请求会在任何付费调用之前于本地以 `INVALID_INPUT` 被拒绝。",
     ],
@@ -212,6 +251,11 @@ test("primary Skill and both READMEs list every selectable model", async () => {
       source,
       /`gpt-image-2` \(default\)|default (?:model )?(?:is )?\(?`gpt-image-2`|`gpt-image-2`（默认）|默认(?:模型)?(?:是|（)? ?`gpt-image-2`/,
       `${label} must not describe gpt-image-2 as the default model`,
+    );
+    assert.doesNotMatch(
+      source,
+      /`gpt-image-2\.5-flare` \(default\)|default (?:model )?(?:is )?\(?`gpt-image-2\.5-flare`|`gpt-image-2\.5-flare`（默认）|默认(?:模型)?(?:是|（)? ?`gpt-image-2\.5-flare`/,
+      `${label} must not describe gpt-image-2.5-flare as the default model`,
     );
   }
 });
@@ -242,6 +286,9 @@ test("internal result Skill preserves returned image facts and warnings", async 
       "`SNAPSHOT_CLEANUP_PENDING` means the committed output is valid while cleanup of private edit-input snapshots remains pending.",
       "Do not expose private input-snapshot paths.",
       "A warning or provider recommendation does not authorize a retry or another paid call.",
+      "For GIF output, also report `actual_frame_count` as the number of animation frames; the actual width and height describe one frame.",
+      "For SVG output, `preview_included` is always false: say that SVG results have no inline preview and direct the user to the saved path.",
+      "When reporting an SVG result, do not paste or inline the SVG source into a page on your own initiative. If the user asks to inline it, tell them to review the markup first: once inlined, its style rules and element `id`s apply to the surrounding page, and the page's own scripts may read its attributes.",
     ],
     "result-handling Skill",
   );
@@ -459,9 +506,24 @@ test("English README documents supported GUI installation, runtime, safety, and 
       "No private snapshot path is returned, and the warning does not authorize a retry or another paid call.",
       "1536x1024",
       "1024x1536",
-      'Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `png` or `webp` output.',
+      'Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare`, and `png` or `webp` output.',
       "The API marks transparent-background support for `gpt-image-2` as preview, so the plugin rejects transparent requests for `gpt-image-2` locally with `INVALID_INPUT` before any paid call.",
+      "Transparent requests with `jpeg`, `gif`, or `svg` output are rejected the same way.",
       "Mask alpha only identifies the edit region; it does not request a transparent output background.",
+      "Inputs may be PNG, JPEG, or WebP; GIF and SVG files are not accepted as edit inputs.",
+      "Its `output_format` is `png` (default), `jpeg`, `webp`, or `gif`; `edit_image` cannot output SVG.",
+      "When `complexity` is omitted, the plugin sends no complexity field and the model default (`high`) applies.",
+      "An optional `markup_path` enables a markup-guided edit. The markup layer must be a PNG with an alpha channel: a transparent layer that carries the annotations drawn over the first input image.",
+      "Its dimensions must match the first input image; when the first input image is a JPEG or WebP, the transposed dimensions are also accepted so that a layer drawn over an EXIF-rotated photo still matches.",
+      "Markup layers require `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` and cannot be combined with `mask_path`.",
+      'The prompt should describe the requested change, refer to the annotation (for example "inside the red circle"), and ask for the annotation to be removed from the result.',
+      "For GIF output, `size` describes one animation frame. When `size` is omitted, the plugin sends `auto`; an explicit GIF size must use multiples of 16 with each edge at most 3840 pixels, and the aspect-ratio and total-pixel limits do not apply.",
+      "`frame_count` (an integer from 2 to 16; the API default is 9) and `frame_duration_ms` (an integer from 20 to 2000 milliseconds; the API default is 200) are optional and accepted only with `output_format: \"gif\"`. GIF output cannot be combined with `mask_path`.",
+      "SVG output is validated as static vector content before it is saved. A provider SVG containing scripts, external references, or embedded raster images is rejected with `INVALID_PROVIDER_RESPONSE`, and nothing is saved.",
+      "A saved SVG is validated as static vector content and is intended to be used as a file: open it directly or reference it as an image. Before pasting its source inline into a web page, review the markup, because once inlined its style rules and element `id`s apply to the surrounding page and the page's own scripts may read its attributes.",
+      "the result also reports `actual_frame_count`",
+      "SVG output never includes an inline preview, so `preview_included` is always false for SVG.",
+      "SVG output is billed for both the reference image and the SVG authoring tokens.",
       "organization verification",
       "rate limit",
       "MCP startup",
@@ -540,9 +602,24 @@ test("Chinese README documents the same supported surface and exact key rule", a
       "不会返回任何私有快照路径，该警告也不授权重试或再次付费调用。",
       "1536x1024",
       "1024x1536",
-      '透明输出需要 `background: "transparent"`、`gpt-image-2.5-sunburst` 或 `gpt-image-2.5-flare` 模型，以及 `png` 或 `webp` 输出格式。',
+      '透明输出需要 `background: "transparent"`、`gpt-image-2.5-sunburst`、`gpt-image-2.5-flare`、`gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare` 模型，以及 `png` 或 `webp` 输出格式。',
       "API 将 `gpt-image-2` 的透明背景支持标记为预览，因此插件会在任何付费调用之前于本地以 `INVALID_INPUT` 拒绝 `gpt-image-2` 的透明请求。",
+      "使用 `jpeg`、`gif` 或 `svg` 输出的透明请求也会以同样方式被拒绝。",
       "蒙版 alpha 只用于标识编辑区域，并不请求透明输出背景。",
+      "输入支持 PNG、JPEG 和 WebP；GIF 和 SVG 文件不能作为编辑输入。",
+      "它的 `output_format` 可以是 `png`（默认）、`jpeg`、`webp` 或 `gif`；`edit_image` 不能输出 SVG。",
+      "省略 `complexity` 时，插件不发送 complexity 字段，由模型默认值（`high`）生效。",
+      "可选的 `markup_path` 用于标注引导编辑。标注层必须是包含 alpha 通道的 PNG：一个承载标注、叠加在第一张输入图像上的透明图层。",
+      "它的尺寸必须与第一张输入图像一致；当第一张输入图像是 JPEG 或 WebP 时，也接受宽高互换的尺寸，使在经过 EXIF 旋转的照片上绘制的标注层仍能匹配。",
+      "标注层需要 `gpt-image-2.5-sunburst`、`gpt-image-2.5-flare`、`gpt-image-2.6-sunburst` 或 `gpt-image-2.6-flare`，且不能与 `mask_path` 同时使用。",
+      "prompt 应描述所需修改、引用标注（例如“红圈内”），并要求从结果中去除标注。",
+      "GIF 输出时，`size` 描述单帧尺寸。省略 `size` 时插件发送 `auto`；显式 GIF 尺寸的宽高必须是 16 的倍数，单边最大 3840 像素，不受宽高比和总像素限制。",
+      "`frame_count`（2 到 16 的整数，API 默认 9）和 `frame_duration_ms`（20 到 2000 的整数，单位为毫秒，API 默认 200）都是可选参数，只能与 `output_format: \"gif\"` 一起使用。GIF 输出不能与 `mask_path` 同时使用。",
+      "SVG 输出在保存前会被验证为静态矢量内容。服务商返回的 SVG 若包含脚本、外部引用或嵌入的位图图像，会以 `INVALID_PROVIDER_RESPONSE` 被拒绝，且不会保存任何文件。",
+      "已保存的 SVG 经过静态矢量内容验证，应作为文件使用：直接打开，或作为图像引用。如需把其源码内联粘贴到网页中，请先审查标记，因为内联后其样式规则和元素 `id` 会作用于所在页面，页面自身的脚本也可能读取其属性。",
+      "结果还会报告 `actual_frame_count`",
+      "SVG 输出从不包含 inline preview，因此 SVG 的 `preview_included` 始终为 false。",
+      "SVG 输出会同时按参考图像和 SVG 编写 token 计费。",
       "组织验证",
       "速率限制",
       "MCP 启动",
@@ -655,6 +732,36 @@ test("legal and release files identify the release without unsupported verificat
     "THIRD_PARTY_NOTICES.md",
   );
   assert.match(changelog, /^## \[0\.1\.1\]/m);
+  const unreleasedStart = changelog.indexOf("\n## [Unreleased]\n");
+  const latestReleaseStart = changelog.indexOf("\n## [0.2.0] - 2026-10-03\n");
+  assert.ok(unreleasedStart >= 0, "CHANGELOG.md must have an Unreleased section");
+  assert.ok(
+    unreleasedStart < latestReleaseStart,
+    "CHANGELOG.md Unreleased section must precede the 0.2.0 release",
+  );
+  const unreleased = changelog.slice(unreleasedStart, latestReleaseStart);
+  assertIncludesAll(
+    unreleased,
+    [
+      "### Added",
+      "### Changed",
+      "### Verification scope",
+      "`gpt-image-2.6-sunburst`",
+      "`gpt-image-2.6-flare`",
+      "`complexity`",
+      '`output_format: "svg"`',
+      '`output_format: "gif"`',
+      "`frame_count`",
+      "`frame_duration_ms`",
+      "`markup_path`",
+      "`actual_frame_count`",
+      "The default model is now `gpt-image-2.6-flare` instead of `gpt-image-2.5-flare`",
+      "billed at the GPT Image 2.6 rates",
+      "SVG output is billed for both the reference image and the SVG authoring tokens.",
+    ],
+    "CHANGELOG.md Unreleased section",
+  );
+  assert.match(unreleased, /No paid image API call was made/);
   assert.match(changelog, /API key.{0,100}(?:optional|not required).{0,120}(?:startup|manifest)/is);
   assert.ok(
     changelog.includes(

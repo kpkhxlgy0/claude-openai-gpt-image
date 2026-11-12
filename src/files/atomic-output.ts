@@ -13,12 +13,12 @@ import { setTimeout as scheduleTimeout } from "node:timers";
 import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { AppError } from "../errors.ts";
-import { inspectImage } from "../images/inspect-image.ts";
+import { inspectOutputImage } from "../images/inspect-output.ts";
 import { decodeStrictBase64 } from "../images/strict-base64.ts";
 import {
   MAX_IMAGE_BYTES,
-  type ImageFormat,
-  type ImageInfo,
+  type OutputImageFormat,
+  type OutputImageInfo,
 } from "../images/types.ts";
 import type { ResolvedOutputPath } from "./workspace-paths.ts";
 import {
@@ -33,7 +33,7 @@ const TEMP_REMOVE_RETRY_DELAY_MS = 25;
 export interface PublishOutputOptions {
   output: ResolvedOutputPath;
   base64: string;
-  format: ImageFormat;
+  format: OutputImageFormat;
   signal?: AbortSignal;
 }
 
@@ -43,7 +43,7 @@ export interface PublishedImage {
   relativePath: string;
   absolutePath: string;
   filename: string;
-  info: ImageInfo;
+  info: OutputImageInfo;
   sizeBytes: number;
   warnings: readonly PublicationWarning[];
 }
@@ -86,13 +86,15 @@ function pathFailure(message: string, cause?: unknown): AppError {
 
 function assertOutputExtension(
   output: ResolvedOutputPath,
-  format: ImageFormat,
+  format: OutputImageFormat,
 ): void {
   const extension = path.extname(output.absolutePath).toLowerCase();
   const matches =
     (format === "png" && extension === ".png") ||
     (format === "webp" && extension === ".webp") ||
-    (format === "jpeg" && (extension === ".jpeg" || extension === ".jpg"));
+    (format === "jpeg" && (extension === ".jpeg" || extension === ".jpg")) ||
+    (format === "gif" && extension === ".gif") ||
+    (format === "svg" && extension === ".svg");
   if (!matches) {
     throw new AppError(
       "INVALID_INPUT",
@@ -261,8 +263,8 @@ async function createFlushedTemp(
 
 async function validateProviderSnapshot(
   tempPath: string,
-  format: ImageFormat,
-): Promise<ImageInfo> {
+  format: OutputImageFormat,
+): Promise<OutputImageInfo> {
   let storedBytes: Buffer;
   try {
     storedBytes = await readFile(tempPath);
@@ -275,7 +277,7 @@ async function validateProviderSnapshot(
   }
 
   try {
-    return await inspectImage(storedBytes, format);
+    return await inspectOutputImage(storedBytes, format);
   } catch (error) {
     if (error instanceof AppError && error.code === "INPUT_FILE_INVALID") {
       throw new AppError(

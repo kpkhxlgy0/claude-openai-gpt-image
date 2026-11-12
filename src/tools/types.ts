@@ -19,7 +19,10 @@ import {
   type ResolvedOutputPath,
 } from "../files/workspace-paths.ts";
 import type { WorkspaceRootRegistry } from "../files/workspace-roots.ts";
-import type { ImageFormat } from "../images/types.ts";
+import type {
+  OutputImageFormat,
+  OutputImageMimeType,
+} from "../images/types.ts";
 import type {
   DEFAULT_IMAGE_MODEL,
   ImageProvider,
@@ -48,9 +51,10 @@ export interface StatusOutput {
   readonly server_version: string;
 }
 
+// SVG output never gets an inline preview.
 export interface InlineImagePreview {
   readonly data: string;
-  readonly mimeType: "image/png" | "image/jpeg" | "image/webp";
+  readonly mimeType: "image/png" | "image/jpeg" | "image/webp" | "image/gif";
 }
 
 export interface ImageToolOutput {
@@ -61,8 +65,10 @@ export interface ImageToolOutput {
   readonly requested_size: ProviderSize;
   readonly actual_width: number;
   readonly actual_height: number;
-  readonly format: ImageFormat;
-  readonly mime_type: "image/png" | "image/jpeg" | "image/webp";
+  /** Number of animation frames; present for GIF output only. */
+  readonly actual_frame_count?: number;
+  readonly format: OutputImageFormat;
+  readonly mime_type: OutputImageMimeType;
   readonly size_bytes: number;
   readonly quality: ProviderQuality;
   readonly preview_included: boolean;
@@ -87,7 +93,7 @@ export interface ToolOperations {
   readonly paths: WorkspacePathResolver;
   readonly snapshotInputs: InputSnapshotter;
   readonly publishOutput: OutputPublisher;
-  readonly makeDefaultOutputPath: (format: ImageFormat) => string;
+  readonly makeDefaultOutputPath: (format: OutputImageFormat) => string;
   readonly deferCleanup: (task: () => Promise<void>) => void;
 }
 
@@ -135,7 +141,7 @@ export function requireImageProvider(context: ToolContext): ImageProvider {
 
 export function selectOutputPath(
   requestedPath: string | undefined,
-  format: ImageFormat,
+  format: OutputImageFormat,
   operations: ToolOperations,
 ): string {
   return requestedPath ?? operations.makeDefaultOutputPath(format);
@@ -143,13 +149,15 @@ export function selectOutputPath(
 
 export function assertOutputFormat(
   output: ResolvedOutputPath,
-  format: ImageFormat,
+  format: OutputImageFormat,
 ): void {
   const extension = path.extname(output.absolutePath).toLowerCase();
   const valid =
     (format === "png" && extension === ".png") ||
     (format === "webp" && extension === ".webp") ||
-    (format === "jpeg" && (extension === ".jpeg" || extension === ".jpg"));
+    (format === "jpeg" && (extension === ".jpeg" || extension === ".jpg")) ||
+    (format === "gif" && extension === ".gif") ||
+    (format === "svg" && extension === ".svg");
   if (!valid) {
     throw new AppError(
       "INVALID_INPUT",

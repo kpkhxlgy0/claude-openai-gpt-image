@@ -2,7 +2,12 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { toErrorResult } from "../errors.ts";
 import type { PublishedImage } from "../files/atomic-output.ts";
 import type { ResolvedOutputPath } from "../files/workspace-paths.ts";
-import { parseImageSize } from "../schemas.ts";
+import type { OutputImageInfo } from "../images/types.ts";
+import {
+  parseAnimationFrameSize,
+  parseImageSize,
+  type ImageSize,
+} from "../schemas.ts";
 import {
   asUnknownRecord,
   sanitizeRequestId,
@@ -19,6 +24,7 @@ import {
   INLINE_PREVIEW_MAX_BYTES,
   type ImageToolOutput,
   type ImageToolWarning,
+  type InlineImagePreview,
   type StatusOutput,
   type ToolSuccessOutput,
 } from "./types.ts";
@@ -120,11 +126,52 @@ function copyUsage(value: unknown): ProviderImageUsage | undefined {
   };
 }
 
+// SVG has no pixel size to compare. A GIF size describes one frame and uses
+// the frame size rules, which accept sizes the raster rules reject. This runs
+// after publication, so it never throws: a requested size that cannot be
+// parsed (possible only for callers that skip the input schema) is not
+// compared and adds no warning.
+function requestedDimensions(
+  info: OutputImageInfo,
+  requestedSize: ProviderSize,
+): ImageSize | null {
+  try {
+    switch (info.format) {
+      case "svg":
+        return null;
+      case "gif":
+        return parseAnimationFrameSize(requestedSize);
+      default:
+        return parseImageSize(requestedSize);
+    }
+  } catch {
+    return null;
+  }
+}
+
+// SVG output is markup, not pixels, so it is never returned inline.
+function previewMimeType(
+  info: OutputImageInfo,
+): InlineImagePreview["mimeType"] | undefined {
+  switch (info.mimeType) {
+    case "image/png":
+    case "image/jpeg":
+    case "image/webp":
+    case "image/gif":
+      return info.mimeType;
+    default:
+      return undefined;
+  }
+}
+
 function collectWarnings(
   options: BuildImageToolOutputOptions,
 ): readonly ImageToolWarning[] {
   const warnings: ImageToolWarning[] = [...options.published.warnings];
-  const requested = parseImageSize(options.requestedSize);
+  const requested = requestedDimensions(
+    options.published.info,
+    options.requestedSize,
+  );
   if (
     requested !== null &&
     (requested.width !== options.published.info.width ||
@@ -138,10 +185,13 @@ function collectWarnings(
 export function buildImageToolOutput(
   options: BuildImageToolOutputOptions,
 ): ImageToolOutput {
+  const previewMime = previewMimeType(options.published.info);
   const previewIncluded =
+    previewMime !== undefined &&
     options.published.sizeBytes <= INLINE_PREVIEW_MAX_BYTES;
   const requestId = sanitizeRequestId(options.providerImage.requestId);
   const usage = copyUsage(options.providerImage.usage);
+  const frameCount = options.published.info.frameCount;
 
   return {
     model: options.model,
@@ -151,6 +201,7 @@ export function buildImageToolOutput(
     requested_size: options.requestedSize,
     actual_width: options.published.info.width,
     actual_height: options.published.info.height,
+    ...(frameCount === undefined ? {} : { actual_frame_count: frameCount }),
     format: options.published.info.format,
     mime_type: options.published.info.mimeType,
     size_bytes: options.published.sizeBytes,
@@ -163,7 +214,7 @@ export function buildImageToolOutput(
       ? {
           preview: {
             data: options.providerImage.base64,
-            mimeType: options.published.info.mimeType,
+            mimeType: previewMime,
           },
         }
       : {}),
@@ -191,6 +242,9 @@ function imageStructured(output: ImageToolOutput): Record<string, unknown> {
     requested_size: output.requested_size,
     actual_width: output.actual_width,
     actual_height: output.actual_height,
+    ...(output.actual_frame_count === undefined
+      ? {}
+      : { actual_frame_count: output.actual_frame_count }),
     format: output.format,
     mime_type: output.mime_type,
     size_bytes: output.size_bytes,
@@ -226,10 +280,15 @@ export function toMcpSuccess(output: ToolSuccessOutput): CallToolResult {
     output.warnings.length === 0
       ? ""
       : ` Warnings: ${output.warnings.join(", ")}.`;
+  const frameCount = output.actual_frame_count;
+  const frameDetail =
+    output.format === "gif" && frameCount !== undefined
+      ? ` ${frameCount} ${frameCount === 1 ? "frame" : "frames"},`
+      : "";
   const content: CallToolResult["content"] = [
     {
       type: "text",
-      text: `Saved ${output.model} image to ${formatUntrustedInlineData(output.relative_path)} (${output.actual_width}x${output.actual_height}, ${output.format}, ${output.size_bytes} bytes).${warningSuffix}`,
+      text: `Saved ${output.model} image to ${formatUntrustedInlineData(output.relative_path)} (${output.actual_width}x${output.actual_height}, ${output.format},${frameDetail} ${output.size_bytes} bytes).${warningSuffix}`,
     },
   ];
   if (output.preview_included && output.preview !== undefined) {

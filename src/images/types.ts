@@ -8,10 +8,30 @@ export interface ImageInfo {
   hasAlpha: boolean;
 }
 
+export type OutputImageFormat = ImageFormat | "gif" | "svg";
+
+export type OutputImageMimeType =
+  | ImageInfo["mimeType"]
+  | "image/gif"
+  | "image/svg+xml";
+
+export interface OutputImageInfo {
+  format: OutputImageFormat;
+  mimeType: OutputImageMimeType;
+  width: number;
+  height: number;
+  hasAlpha: boolean;
+  /** Number of image frames; present for GIF only. */
+  frameCount?: number;
+}
+
 export const MAX_IMAGE_BYTES = 64 * 1024 * 1024;
+export const MAX_SVG_BYTES = 16 * 1024 * 1024;
+export const MAX_GIF_FRAMES = 256;
 export const MAX_IMAGE_EDGE = 16_384;
 export const MAX_IMAGE_PIXELS = 16_777_216;
 export const MAX_DECODED_IMAGE_BYTES = 128 * 1024 * 1024;
+export const MAX_GIF_TOTAL_FRAME_PIXELS = 16 * MAX_IMAGE_PIXELS;
 
 export type ImageValidationFailure = (message: string) => never;
 

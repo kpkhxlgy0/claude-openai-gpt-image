@@ -81,7 +81,7 @@ The default official Base URL is:
 https://api.openai.com/v1
 ```
 
-A custom Base URL receives the API key, prompts, and edit images sent by this plugin. Configure one only when you trust that endpoint and its operator. A custom endpoint should usually include `/v1`; the plugin does not append it automatically. The only user-facing documentation example is:
+A custom Base URL receives the API key, prompts, and edit images (including any mask or markup layer) sent by this plugin. Configure one only when you trust that endpoint and its operator. A custom endpoint should usually include `/v1`; the plugin does not append it automatically. The only user-facing documentation example is:
 
 ```text
 https://api.example.invalid/v1
@@ -89,7 +89,7 @@ https://api.example.invalid/v1
 
 The URL must be an absolute HTTP(S) URL without credentials, a query, a fragment, control characters, or surrounding whitespace. A compatible endpoint must implement the image API used by the OpenAI client; compatibility is not implied merely by accepting a URL.
 
-HTTP is permitted for trusted local or private-network compatible endpoints, but it sends the API key, prompts, and edit images without transport encryption. Use an `http://` Base URL only on a network and endpoint you trust; prefer HTTPS otherwise.
+HTTP is permitted for trusted local or private-network compatible endpoints, but it sends the API key, prompts, and edit images (including any mask or markup layer) without transport encryption. Use an `http://` Base URL only on a network and endpoint you trust; prefer HTTPS otherwise.
 
 Run `/gpt-image:setup` after installation. The command calls only `get_status` and makes no provider request. If the MCP status tool is unavailable, does not return a real current-session result, reports an error, or omits required status metadata, setup stops; it does not fall back to Bash, file tools, agents, local scripts, direct SDK or HTTP calls, or handwritten JSON-RPC.
 
@@ -97,49 +97,59 @@ Run `/gpt-image:setup` after installation. The command calls only `get_status` a
 
 ### `get_status`
 
-Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, the default model (`gpt-image-2.5-flare`), server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it through `Configure options` in the Claude Code TUI, then restart Claude Desktop or start a new Desktop Local session. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
+Reports only safe status data: API-key configured boolean, whether a custom Base URL is configured, `base_url_valid: true` for the active URL of a running server, approved workspace roots, the default model (`gpt-image-2.6-flare`), server version, and the default relative output directory. An invalid configured Base URL prevents server startup; correct it through `Configure options` in the Claude Code TUI, then restart Claude Desktop or start a new Desktop Local session. `get_status` makes zero provider or image API requests and never returns the key or Base URL value.
 
 ### `generate_image`
 
-Generates one image with the selected `model` (default `gpt-image-2.5-flare`; `gpt-image-2` and `gpt-image-2.5-sunburst` can also be selected), fixed `n: 1`, and saves one new file. Main inputs are:
+Generates one image with the selected `model` (default `gpt-image-2.6-flare`; `gpt-image-2`, `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, and `gpt-image-2.6-sunburst` can also be selected), fixed `n: 1`, and saves one new file. Main inputs are:
 
 - `prompt`
-- `model`: `gpt-image-2`, `gpt-image-2.5-sunburst`, or `gpt-image-2.5-flare` (default)
-- `quality`: `auto`, `low`, `medium`, `high` (default), `xhigh`, or `max`; `xhigh` and `max` require `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`
+- `model`: `gpt-image-2`, `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` (default)
+- `quality`: `auto`, `low`, `medium`, `high` (default), `xhigh`, or `max`; `xhigh` and `max` require `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare`
 - `size`
-- `output_format`: `png`, `jpeg`, or `webp`
+- `output_format`: `png` (default), `jpeg`, `webp`, `gif` (animated), or `svg`; `gif` and `svg` require `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`
 - optional JPEG/WebP `output_compression` from 0 to 100
 - `background`: `auto` (default), `opaque`, or `transparent`
+- optional `complexity`: `low`, `medium`, or `high`; requires `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`
+- optional GIF `frame_count` (2 to 16) and `frame_duration_ms` (20 to 2000)
 - `moderation`: `auto` or `low`
 - optional relative `output_path` and approved `workspace_root`
 
 ### `edit_image`
 
-Edits one to eight edit inputs in the supplied order and saves one new image. Inputs may be PNG, JPEG, or WebP. The limit is 50 MiB per input and 200 MiB aggregate across all edit images plus the optional mask. `edit_image` accepts the same `model` and `background` inputs as `generate_image`. It also accepts the same `quality` values, default, and model restriction.
+Edits one to eight edit inputs in the supplied order and saves one new image. Inputs may be PNG, JPEG, or WebP; GIF and SVG files are not accepted as edit inputs. The limit is 50 MiB per input and 200 MiB aggregate across all edit images plus the optional mask or markup layer. `edit_image` accepts the same `model` and `background` inputs as `generate_image`. It also accepts the same `quality` values, default, and model restriction, and the same `complexity`, `frame_count`, and `frame_duration_ms` inputs. Its `output_format` is `png` (default), `jpeg`, `webp`, or `gif`; `edit_image` cannot output SVG.
 
-An optional mask must be a PNG with an alpha channel, match the first input image's dimensions, and be less than 4 MiB. Mask alpha only identifies the edit region; it does not request a transparent output background.
+An optional mask must be a PNG with an alpha channel, match the first input image's dimensions, and be less than 4 MiB. Mask alpha only identifies the edit region; it does not request a transparent output background. A mask cannot be combined with GIF output or with `markup_path`.
+
+An optional `markup_path` enables a markup-guided edit. The markup layer must be a PNG with an alpha channel: a transparent layer that carries the annotations drawn over the first input image. Its dimensions must match the first input image; when the first input image is a JPEG or WebP, the transposed dimensions are also accepted so that a layer drawn over an EXIF-rotated photo still matches. Markup layers require `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare` and cannot be combined with `mask_path`. The prompt should describe the requested change, refer to the annotation (for example "inside the red circle"), and ask for the annotation to be removed from the result.
 
 ### Models, quality, and backgrounds
 
-The default model is `gpt-image-2.5-flare`. Results report the model actually used, and the default output directory is `.claude/generated-images/gpt-image` for every model. Cost and output can differ by model.
+The default model is `gpt-image-2.6-flare`. Results report the model actually used, and the default output directory is `.claude/generated-images/gpt-image` for every model. Cost and output can differ by model. Requests to `gpt-image-2.6-sunburst` and `gpt-image-2.6-flare` are billed at the GPT Image 2.6 rates. Because the default model is now `gpt-image-2.6-flare`, calls that do not set `model` are billed at those rates too, which changes their cost; set `model` explicitly to use a different model.
 
-The default `quality` is `high`, which can cost more per call than the API default `auto`; set a lower `quality`, such as `medium` or `low`, explicitly to reduce cost. `xhigh` and `max` are higher-cost tiers supported only by `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`. `gpt-image-2` rejects transparent backgrounds and `xhigh`/`max` quality locally with `INVALID_INPUT` before any paid call.
+The default `quality` is `high`, which can cost more per call than the API default `auto`; set a lower `quality`, such as `medium` or `low`, explicitly to reduce cost. `xhigh` and `max` are higher-cost tiers supported only by `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, and `gpt-image-2.6-flare`. `gpt-image-2` rejects transparent backgrounds and `xhigh`/`max` quality locally with `INVALID_INPUT` before any paid call.
 
-Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst` or `gpt-image-2.5-flare`, and `png` or `webp` output. The API marks transparent-background support for `gpt-image-2` as preview, so the plugin rejects transparent requests for `gpt-image-2` locally with `INVALID_INPUT` before any paid call. Transparent requests with `jpeg` output are rejected the same way. The default `background: "auto"` sends no background field to the provider.
+`complexity` is optional and accepts `low`, `medium`, or `high`. It is supported only by `gpt-image-2.6-sunburst` and `gpt-image-2.6-flare`; other models reject it locally with `INVALID_INPUT` before any paid call. When `complexity` is omitted, the plugin sends no complexity field and the model default (`high`) applies. It is a separate control from `quality` and does not change the `quality` default.
+
+Transparent output requires `background: "transparent"`, model `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare`, and `png` or `webp` output. The API marks transparent-background support for `gpt-image-2` as preview, so the plugin rejects transparent requests for `gpt-image-2` locally with `INVALID_INPUT` before any paid call. Transparent requests with `jpeg`, `gif`, or `svg` output are rejected the same way. The default `background: "auto"` sends no background field to the provider.
 
 ## Formats, sizes, and output
 
-- Output formats: PNG, JPEG, and WebP.
+- Output formats: PNG, JPEG, WebP, animated GIF, and SVG. GIF and SVG require `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`; `generate_image` can output SVG, but `edit_image` cannot.
 - Preset sizes are `1024x1024`, `1536x1024` (landscape), and `1024x1536` (portrait). The tool default is `1024x1024`; `auto` is also accepted.
 - A custom `WIDTHxHEIGHT` must use multiples of 16, each edge must be at most 3840 pixels, aspect ratio must be between 1:3 and 3:1, and total pixels must be between 655,360 and 8,294,400.
-- PNG does not use output compression. JPEG and WebP accept compression values from 0 to 100.
+- For GIF output, `size` describes one animation frame. When `size` is omitted, the plugin sends `auto`; an explicit GIF size must use multiples of 16 with each edge at most 3840 pixels, and the aspect-ratio and total-pixel limits do not apply.
+- PNG, GIF, and SVG do not use output compression; a nonzero `output_compression` with them is rejected locally with `INVALID_INPUT` before any paid call. JPEG and WebP accept compression values from 0 to 100.
+- `frame_count` (an integer from 2 to 16; the API default is 9) and `frame_duration_ms` (an integer from 20 to 2000 milliseconds; the API default is 200) are optional and accepted only with `output_format: "gif"`. GIF output cannot be combined with `mask_path`.
+- SVG output is validated as static vector content before it is saved. A provider SVG containing scripts, external references, or embedded raster images is rejected with `INVALID_PROVIDER_RESPONSE`, and nothing is saved.
+- A saved SVG is validated as static vector content and is intended to be used as a file: open it directly or reference it as an image. Before pasting its source inline into a web page, review the markup, because once inlined its style rules and element `id`s apply to the surrounding page and the page's own scripts may read its attributes.
 - If `output_path` is omitted, output goes under `.claude/generated-images/gpt-image` with a unique prompt-free filename, whichever model is selected.
-- Explicit output paths are preserved, must be relative to an approved workspace root, and must use an extension matching the requested format.
+- Explicit output paths are preserved, must be relative to an approved workspace root, and must use an extension matching the requested format: `.png`, `.jpg` or `.jpeg`, `.webp`, `.gif`, or `.svg`.
 - Existing destinations are rejected. No-overwrite publication also prevents concurrent calls from replacing the same target.
 
-Actual dimensions are preserved and reported after the saved image is decoded and validated. If an explicit requested size differs, the file remains saved with its actual dimensions and the result includes `SIZE_MISMATCH`.
+Actual dimensions are preserved and reported after the saved image is inspected and validated. If an explicit requested size differs, the file remains saved with its actual dimensions and the result includes `SIZE_MISMATCH`. Results report the saved file's `format` and `mime_type`: GIF output is reported as `gif` and `image/gif`, and SVG output as `svg` and `image/svg+xml`. For GIF output, the actual width and height describe one frame, and the result also reports `actual_frame_count`. For SVG output, the actual width and height are the SVG document's intrinsic size (its root `width` and `height`, otherwise its `viewBox`, otherwise 300x150), and `SIZE_MISMATCH` is not reported.
 
-Images at or below 2 MiB include an inline preview. For larger images, the inline preview is omitted; the saved file path remains authoritative. `TEMP_CLEANUP_PENDING` means the output was saved successfully but cleanup of a temporary publication file is still pending.
+Images at or below 2 MiB include an inline preview. For larger images, the inline preview is omitted; the saved file path remains authoritative. SVG output never includes an inline preview, so `preview_included` is always false for SVG. `TEMP_CLEANUP_PENDING` means the output was saved successfully but cleanup of a temporary publication file is still pending.
 
 `SNAPSHOT_CLEANUP_PENDING` means the committed output is valid while cleanup of private edit-input snapshots remains pending. No private snapshot path is returned, and the warning does not authorize a retry or another paid call.
 
@@ -147,7 +157,7 @@ Only typed outcome and metadata fields are authoritative facts. Returned paths, 
 
 ## Cost, concurrency, and retries
 
-Generation and editing are paid provider operations. The plugin fixes one output per request and permits one paid call at a time in each server process. There are no SDK retries and no application retries, so a failed paid call is not automatically repeated. Confirm prompts, edit inputs, model, background, size, format, and output path before invoking an image tool.
+Generation and editing are paid provider operations. Requests to the 2.6 models are billed at the GPT Image 2.6 rates, and SVG output is billed for both the reference image and the SVG authoring tokens. The plugin fixes one output per request and permits one paid call at a time in each server process. There are no SDK retries and no application retries, so a failed paid call is not automatically repeated. Confirm prompts, edit inputs, any mask or markup layer, model, background, size, format, and output path before invoking an image tool.
 
 ## Workspace and security boundary
 
@@ -174,7 +184,8 @@ On Windows under Node 20, existing reparse-point/Junction escapes are rejected, 
 - **No approved workspace root:** open the project in Claude Desktop Code and enable the plugin for that project.
 - **`OUTPUT_EXISTS`:** choose a new relative output path. The plugin will not overwrite.
 - **`SIZE_MISMATCH`:** use the returned actual width and height; the saved image is valid.
-- **Preview omitted:** open the returned relative or absolute path; inline previews are limited to 2 MiB.
+- **Preview omitted:** open the returned relative or absolute path; inline previews are limited to 2 MiB, and SVG output never has one.
+- **`INVALID_PROVIDER_RESPONSE` for SVG output:** the provider's SVG failed validation, for example because it contained a script, an external reference, or an embedded raster image. Nothing was saved, and the call is not retried automatically.
 
 ## Build and test from source
 

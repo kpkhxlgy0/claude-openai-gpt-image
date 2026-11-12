@@ -54,6 +54,50 @@ function assertMaskValid(
   }
 }
 
+// The API compares the markup layer with the first image after EXIF
+// orientation, which the local inspectors do not apply. A layer drawn for a
+// rotated JPEG or WebP therefore matches the stored dimensions or their
+// transpose. Those are the formats that commonly carry EXIF orientation, so
+// only they get the transposed allowance; a PNG first image must match
+// exactly. No EXIF data is parsed.
+function assertMarkupValid(
+  images: readonly InputSnapshot[],
+  markup: InputSnapshot,
+): void {
+  const first = images[0];
+  if (first === undefined) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Input snapshots were not prepared correctly",
+    );
+  }
+
+  if (markup.info.format !== "png" || markup.info.mimeType !== "image/png") {
+    throw new AppError("INPUT_FILE_INVALID", "Edit markup must be a PNG image");
+  }
+  if (!markup.info.hasAlpha) {
+    throw new AppError(
+      "INPUT_FILE_INVALID",
+      "Edit markup PNG must contain an alpha channel",
+    );
+  }
+  const { width, height } = markup.info;
+  const matchesStored =
+    width === first.info.width && height === first.info.height;
+  const mayBeRotated =
+    first.info.format === "jpeg" || first.info.format === "webp";
+  const matchesTransposed =
+    mayBeRotated &&
+    width === first.info.height &&
+    height === first.info.width;
+  if (!matchesStored && !matchesTransposed) {
+    throw new AppError(
+      "INPUT_FILE_INVALID",
+      "Edit markup dimensions must match the first input image",
+    );
+  }
+}
+
 export async function editImage(
   input: EditImageInput,
   context: ToolContext,
@@ -64,10 +108,20 @@ export async function editImage(
   const provider = requireImageProvider(context);
   const operations = getToolOperations(context);
 
-  const inputPaths =
-    input.mask_path === undefined
-      ? input.image_paths
-      : [...input.image_paths, input.mask_path];
+  // Inputs are ordered images, then the optional mask, then the optional
+  // markup layer. The schema keeps mask and markup apart, but the indexes
+  // below do not depend on that.
+  const maskIndex =
+    input.mask_path === undefined ? undefined : input.image_paths.length;
+  const markupIndex =
+    input.markup_path === undefined
+      ? undefined
+      : input.image_paths.length + (maskIndex === undefined ? 0 : 1);
+  const inputPaths = [
+    ...input.image_paths,
+    ...(input.mask_path === undefined ? [] : [input.mask_path]),
+    ...(input.markup_path === undefined ? [] : [input.markup_path]),
+  ];
   const resolvedInputs = await Promise.all(
     inputPaths.map((inputPath) =>
       operations.paths.resolveInput(inputPath, input.workspace_root),
@@ -76,9 +130,9 @@ export async function editImage(
   signal?.throwIfAborted();
   const resolvedImages = resolvedInputs.slice(0, input.image_paths.length);
   const resolvedMask =
-    input.mask_path === undefined
-      ? undefined
-      : resolvedInputs[input.image_paths.length];
+    maskIndex === undefined ? undefined : resolvedInputs[maskIndex];
+  const resolvedMarkup =
+    markupIndex === undefined ? undefined : resolvedInputs[markupIndex];
 
   const requestedOutputPath = selectOutputPath(
     input.output_path,
@@ -97,7 +151,7 @@ export async function editImage(
   ) {
     throw new AppError(
       "INVALID_INPUT",
-      "Output path must not identify an edit input or mask",
+      "Output path must not identify an edit input, mask, or markup layer",
     );
   }
 
@@ -132,15 +186,25 @@ export async function editImage(
         resolvedImages.length,
       );
       const maskSnapshot =
-        resolvedMask === undefined
-          ? undefined
-          : snapshotSet.snapshots[resolvedImages.length];
+        maskIndex === undefined ? undefined : snapshotSet.snapshots[maskIndex];
       if (maskSnapshot !== undefined) {
         assertMaskValid(imageSnapshots, maskSnapshot);
       } else if (resolvedMask !== undefined) {
         throw new AppError(
           "INTERNAL_ERROR",
           "Mask snapshot was not prepared correctly",
+        );
+      }
+      const markupSnapshot =
+        markupIndex === undefined
+          ? undefined
+          : snapshotSet.snapshots[markupIndex];
+      if (markupSnapshot !== undefined) {
+        assertMarkupValid(imageSnapshots, markupSnapshot);
+      } else if (resolvedMarkup !== undefined) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Markup snapshot was not prepared correctly",
         );
       }
 
@@ -154,8 +218,18 @@ export async function editImage(
           ? {}
           : { output_compression: input.output_compression }),
         background: input.background,
+        ...(input.complexity === undefined
+          ? {}
+          : { complexity: input.complexity }),
+        ...(input.frame_count === undefined
+          ? {}
+          : { frame_count: input.frame_count }),
+        ...(input.frame_duration_ms === undefined
+          ? {}
+          : { frame_duration_ms: input.frame_duration_ms }),
         images: imageSnapshots,
         ...(maskSnapshot === undefined ? {} : { mask: maskSnapshot }),
+        ...(markupSnapshot === undefined ? {} : { markup: markupSnapshot }),
       };
       signal?.throwIfAborted();
       const providerImage = await provider.edit(request, signal);

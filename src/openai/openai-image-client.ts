@@ -19,23 +19,38 @@ import {
 } from "./map-error.ts";
 import type {
   ImageProvider,
+  ProviderComplexity,
+  ProviderEditOutputFormat,
   ProviderEditRequest,
   ProviderGenerateRequest,
   ProviderImage,
   ProviderImageUsage,
   ProviderInputSnapshot,
+  ProviderOutputFormat,
   ProviderTokenDetails,
 } from "./types.ts";
 
 export type OpenAIImagesResponse = ImagesResponse;
 export type OpenAIImageGenerateBody = Omit<
   ImageGenerateParamsNonStreaming,
-  "quality"
+  "quality" | "output_format"
 > & {
   quality?: ImageGenerateParamsNonStreaming["quality"] | "xhigh" | "max";
+  output_format?: ProviderOutputFormat;
+  complexity?: ProviderComplexity;
+  frame_count?: number;
+  frame_duration_ms?: number;
 };
-export type OpenAIImageEditBody = Omit<ImageEditParamsNonStreaming, "quality"> & {
+export type OpenAIImageEditBody = Omit<
+  ImageEditParamsNonStreaming,
+  "quality" | "output_format"
+> & {
   quality?: ImageEditParamsNonStreaming["quality"] | "xhigh" | "max";
+  output_format?: ProviderEditOutputFormat;
+  complexity?: ProviderComplexity;
+  frame_count?: number;
+  frame_duration_ms?: number;
+  markup?: File;
 };
 
 export interface OpenAIImageWithResponse {
@@ -118,14 +133,18 @@ function createDefaultSDKClient(
   return {
     images: {
       generate: (body, requestOptions) => {
-        // SDK 6.49.0 predates the GPT Image 2.5 quality values xhigh and max.
+        // SDK 6.49.0 predates the GPT Image 2.5/2.6 fields (xhigh and max
+        // quality, complexity, GIF and SVG output, GIF frame fields); it sends
+        // unknown body keys and values unchanged.
         const sdkBody = body as ImageGenerateParamsNonStreaming;
         return requestOptions === undefined
           ? client.images.generate(sdkBody)
           : client.images.generate(sdkBody, requestOptions);
       },
       edit: (body, requestOptions) => {
-        // SDK 6.49.0 predates the GPT Image 2.5 quality values xhigh and max.
+        // SDK 6.49.0 predates the GPT Image 2.5/2.6 fields (xhigh and max
+        // quality, complexity, GIF output, GIF frame fields, the markup
+        // layer); it sends unknown multipart fields and values unchanged.
         const sdkBody = body as ImageEditParamsNonStreaming;
         return requestOptions === undefined
           ? client.images.edit(sdkBody)
@@ -191,6 +210,18 @@ function assertEditSnapshots(request: ProviderEditRequest): void {
       invalidInput("Mask snapshot must be smaller than 4 MiB");
     }
     aggregateBytes += request.mask.sizeBytes;
+  }
+  // The markup layer is bounded by the per-input and aggregate limits only;
+  // the 4 MiB mask limit does not apply to it.
+  if (request.markup !== undefined) {
+    if (request.mask !== undefined) {
+      invalidInput("Markup and mask snapshots cannot be combined");
+    }
+    assertSnapshotDescriptor(request.markup);
+    if (request.markup.info.mimeType !== "image/png") {
+      invalidInput("Markup snapshot must be a PNG image");
+    }
+    aggregateBytes += request.markup.sizeBytes;
   }
   if (
     !Number.isSafeInteger(aggregateBytes) ||
@@ -272,15 +303,29 @@ async function snapshotToUpload(
   }
 }
 
+// Only JPEG and WebP have a compression setting. PNG, GIF, and SVG requests
+// never carry output_compression, even a normalized zero.
 function addCompression(
   body: OpenAIImageGenerateBody | OpenAIImageEditBody,
   request: ProviderGenerateRequest | ProviderEditRequest,
 ): void {
   if (
-    request.output_format !== "png" &&
+    (request.output_format === "jpeg" || request.output_format === "webp") &&
     request.output_compression !== undefined
   ) {
     body.output_compression = request.output_compression;
+  }
+}
+
+function addAnimation(
+  body: OpenAIImageGenerateBody | OpenAIImageEditBody,
+  request: ProviderGenerateRequest | ProviderEditRequest,
+): void {
+  if (request.frame_count !== undefined) {
+    body.frame_count = request.frame_count;
+  }
+  if (request.frame_duration_ms !== undefined) {
+    body.frame_duration_ms = request.frame_duration_ms;
   }
 }
 
@@ -290,6 +335,15 @@ function addBackground(
 ): void {
   if (request.background !== "auto") {
     body.background = request.background;
+  }
+}
+
+function addComplexity(
+  body: OpenAIImageGenerateBody | OpenAIImageEditBody,
+  request: ProviderGenerateRequest | ProviderEditRequest,
+): void {
+  if (request.complexity !== undefined) {
+    body.complexity = request.complexity;
   }
 }
 
@@ -420,6 +474,8 @@ export class OpenAIImageClient implements ImageProvider {
     };
     addCompression(body, request);
     addBackground(body, request);
+    addComplexity(body, request);
+    addAnimation(body, request);
     return this.#invoke(
       () =>
         signal === undefined
@@ -451,8 +507,13 @@ export class OpenAIImageClient implements ImageProvider {
     };
     addCompression(body, request);
     addBackground(body, request);
+    addComplexity(body, request);
+    addAnimation(body, request);
     if (request.mask !== undefined) {
       body.mask = await snapshotToUpload(request.mask, signal);
+    }
+    if (request.markup !== undefined) {
+      body.markup = await snapshotToUpload(request.markup, signal);
     }
     signal?.throwIfAborted();
     return this.#invoke(

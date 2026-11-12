@@ -32,6 +32,15 @@ export async function generateImage(
       ? {}
       : { output_compression: input.output_compression }),
     background: input.background,
+    ...(input.complexity === undefined
+      ? {}
+      : { complexity: input.complexity }),
+    ...(input.frame_count === undefined
+      ? {}
+      : { frame_count: input.frame_count }),
+    ...(input.frame_duration_ms === undefined
+      ? {}
+      : { frame_duration_ms: input.frame_duration_ms }),
     moderation: input.moderation,
   };
 

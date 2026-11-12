@@ -14,6 +14,7 @@ import { createSafeLogger, type SafeLogger } from "./logger.ts";
 import {
   DEFAULT_IMAGE_MODEL,
   IMAGE_MODELS,
+  IMAGE_OUTPUT_FORMATS,
   IMAGE_QUALITIES,
 } from "./openai/types.ts";
 import {
@@ -93,8 +94,15 @@ const imageSuccessOutputSchema = z.strictObject({
   requested_size: z.string(),
   actual_width: z.number().int().positive(),
   actual_height: z.number().int().positive(),
-  format: z.enum(["png", "jpeg", "webp"]),
-  mime_type: z.enum(["image/png", "image/jpeg", "image/webp"]),
+  actual_frame_count: z.number().int().positive().optional(),
+  format: z.enum(IMAGE_OUTPUT_FORMATS),
+  mime_type: z.enum([
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+  ]),
   size_bytes: z.number().int().nonnegative(),
   quality: z.enum(IMAGE_QUALITIES),
   preview_included: z.boolean(),

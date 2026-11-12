@@ -185,3 +185,122 @@ export function corruptWebPBitstream(bytes: Buffer): Buffer {
   corrupted.fill(0xff, corruptionStart, payloadStart + payloadLength);
   return corrupted;
 }
+
+const GIF_CLEAR_CODE = 4;
+const GIF_END_CODE = 5;
+const GIF_CODE_BITS = 3;
+
+/**
+ * Encodes `pixelCount` copies of palette index 0 as an LZW stream with
+ * minimum code size 2. A clear code precedes every pair of pixels, so the
+ * decoder table never grows past code 6 and every code stays 3 bits wide.
+ */
+function makeGifImageData(pixelCount: number): Buffer {
+  const codes: number[] = [];
+  for (let pixel = 0; pixel < pixelCount; pixel += 2) {
+    codes.push(GIF_CLEAR_CODE, 0);
+    if (pixel + 1 < pixelCount) codes.push(0);
+  }
+  codes.push(GIF_END_CODE);
+
+  const packed: number[] = [];
+  let bitBuffer = 0;
+  let bitCount = 0;
+  for (const code of codes) {
+    bitBuffer |= code << bitCount;
+    bitCount += GIF_CODE_BITS;
+    while (bitCount >= 8) {
+      packed.push(bitBuffer & 0xff);
+      bitBuffer >>>= 8;
+      bitCount -= 8;
+    }
+  }
+  if (bitCount > 0) packed.push(bitBuffer & 0xff);
+
+  const subBlocks: number[] = [];
+  for (let start = 0; start < packed.length; start += 255) {
+    const block = packed.slice(start, start + 255);
+    subBlocks.push(block.length, ...block);
+  }
+  subBlocks.push(0);
+  return Buffer.from(subBlocks);
+}
+
+function makeGifGraphicControl(transparent: boolean): Buffer {
+  const extension = Buffer.alloc(8);
+  extension[0] = 0x21;
+  extension[1] = 0xf9;
+  extension[2] = 4;
+  extension[3] = (2 << 2) | (transparent ? 1 : 0);
+  extension.writeUInt16LE(10, 4);
+  extension[6] = 0;
+  extension[7] = 0;
+  return extension;
+}
+
+const GIF_NETSCAPE_LOOP = Buffer.concat([
+  Buffer.from([0x21, 0xff, 0x0b]),
+  Buffer.from("NETSCAPE2.0", "ascii"),
+  Buffer.from([0x03, 0x01, 0x00, 0x00, 0x00]),
+]);
+
+/**
+ * Builds a structurally valid GIF whose frames each cover the full logical
+ * screen with palette index 0 of a two-entry global color table.
+ */
+export function makeGif(options: {
+  width?: number;
+  height?: number;
+  frames?: number;
+  transparent?: boolean;
+  version?: "87a" | "89a";
+} = {}): Buffer {
+  const width = options.width ?? 8;
+  const height = options.height ?? 8;
+  const frames = options.frames ?? 1;
+  const transparent = options.transparent ?? false;
+  const version = options.version ?? "89a";
+  if (version === "87a" && (transparent || frames > 1)) {
+    throw new Error("GIF87a fixtures support only one opaque frame");
+  }
+
+  const screen = Buffer.alloc(7);
+  screen.writeUInt16LE(width, 0);
+  screen.writeUInt16LE(height, 2);
+  screen[4] = 0x80;
+  const globalColorTable = Buffer.from([0x00, 0x00, 0x00, 0xff, 0xff, 0xff]);
+
+  const descriptor = Buffer.alloc(10);
+  descriptor[0] = 0x2c;
+  descriptor.writeUInt16LE(width, 5);
+  descriptor.writeUInt16LE(height, 7);
+  const imageData = Buffer.concat([Buffer.from([2]), makeGifImageData(width * height)]);
+
+  const blocks: Buffer[] = [];
+  if (frames > 1) blocks.push(GIF_NETSCAPE_LOOP);
+  for (let frame = 0; frame < frames; frame += 1) {
+    if (transparent || frames > 1) blocks.push(makeGifGraphicControl(transparent));
+    blocks.push(descriptor, imageData);
+  }
+
+  return Buffer.concat([
+    Buffer.from(`GIF${version}`, "ascii"),
+    screen,
+    globalColorTable,
+    ...blocks,
+    Buffer.from([0x3b]),
+  ]);
+}
+
+/**
+ * Wraps `body` in an SVG root element that declares the SVG namespace.
+ */
+export function makeSvg(
+  body = "",
+  rootAttributes = 'width="64" height="32"',
+): Buffer {
+  return Buffer.from(
+    `<svg xmlns="http://www.w3.org/2000/svg" ${rootAttributes}>${body}</svg>`,
+    "utf8",
+  );
+}

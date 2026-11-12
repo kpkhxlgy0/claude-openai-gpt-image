@@ -33,7 +33,13 @@ import {
   WorkspacePaths,
 } from "../src/files/workspace-paths.ts";
 import { WorkspaceRootRegistry } from "../src/files/workspace-roots.ts";
-import { makeBaselineJpeg, makeLosslessWebP, makePng } from "./helpers/image-fixtures.ts";
+import {
+  makeBaselineJpeg,
+  makeGif,
+  makeLosslessWebP,
+  makePng,
+  makeSvg,
+} from "./helpers/image-fixtures.ts";
 
 interface LifecycleFixture {
   root: string;
@@ -906,5 +912,117 @@ test("hard-link publication failure removes the temporary file", async () => {
     );
     await assert.rejects(() => access(output.absolutePath), { code: "ENOENT" });
     assert.deepEqual(await readdir(output.parentPath), []);
+  });
+});
+
+test("makeDefaultOutputPath uses the .gif and .svg extensions for GIF and SVG output", () => {
+  const now = new Date("2026-11-12T08:09:10.000Z");
+  assert.equal(
+    makeDefaultOutputPath("gif", now, () => Buffer.from("0a0b0c0d", "hex")),
+    ".claude/generated-images/gpt-image/20261112-080910-0a0b0c0d.gif",
+  );
+  assert.equal(
+    makeDefaultOutputPath("svg", now, () => Buffer.from("deadbeef", "hex")),
+    ".claude/generated-images/gpt-image/20261112-080910-deadbeef.svg",
+  );
+});
+
+test("publishOutput publishes validated GIF and SVG output with their inspected metadata", async () => {
+  await withLifecycleFixture(async ({ root, paths }) => {
+    const gif = makeGif({ width: 8, height: 4, frames: 3 });
+    const gifOutput = await paths.resolveOutput("outputs/animated.gif");
+    const publishedGif = await publishOutput({
+      output: gifOutput,
+      base64: gif.toString("base64"),
+      format: "gif",
+    });
+    assert.deepEqual(publishedGif, {
+      relativePath: "outputs/animated.gif",
+      absolutePath: path.join(root, "outputs", "animated.gif"),
+      filename: "animated.gif",
+      info: {
+        format: "gif",
+        mimeType: "image/gif",
+        width: 8,
+        height: 4,
+        hasAlpha: false,
+        frameCount: 3,
+      },
+      sizeBytes: gif.length,
+      warnings: [],
+    });
+    assert.deepEqual(await readFile(gifOutput.absolutePath), gif);
+
+    const svg = makeSvg('<rect width="64" height="32"/>');
+    const svgOutput = await paths.resolveOutput("outputs/vector.SVG");
+    const publishedSvg = await publishOutput({
+      output: svgOutput,
+      base64: svg.toString("base64"),
+      format: "svg",
+    });
+    assert.deepEqual(publishedSvg.info, {
+      format: "svg",
+      mimeType: "image/svg+xml",
+      width: 64,
+      height: 32,
+      hasAlpha: true,
+    });
+    assert.equal(publishedSvg.sizeBytes, svg.length);
+    assert.deepEqual(await readFile(svgOutput.absolutePath), svg);
+    assert.deepEqual((await readdir(gifOutput.parentPath)).sort(), [
+      "animated.gif",
+      "vector.SVG",
+    ]);
+  });
+});
+
+test("publishOutput requires the .gif and .svg extensions for GIF and SVG output", async () => {
+  await withLifecycleFixture(async ({ paths }) => {
+    for (const [format, outputPath, bytes] of [
+      ["gif", "outputs/wrong.png", makeGif()],
+      ["gif", "outputs/wrong.svg", makeGif()],
+      ["svg", "outputs/wrong.gif", makeSvg()],
+      ["svg", "outputs/wrong.png", makeSvg()],
+      ["png", "outputs/wrong.gif", makePng()],
+      ["png", "outputs/wrong.svg", makePng()],
+    ] as const) {
+      const output = await paths.resolveOutput(outputPath);
+      await assert.rejects(
+        () => publishOutput({ output, base64: bytes.toString("base64"), format }),
+        (error: unknown) =>
+          error instanceof AppError &&
+          error.code === "INVALID_INPUT" &&
+          error.message ===
+            "INVALID_INPUT: Output filename extension must match the requested image format",
+      );
+      await assert.rejects(() => access(output.parentPath), { code: "ENOENT" });
+    }
+  });
+});
+
+test("publishOutput rejects provider bytes that fail GIF or SVG inspection without residue", async () => {
+  await withLifecycleFixture(async ({ paths }) => {
+    for (const [format, outputPath, bytes] of [
+      ["svg", "outputs/script.svg", makeSvg("<script>alert(1)</script>")],
+      ["svg", "outputs/handler.svg", makeSvg("", 'width="64" height="32" onload="x()"')],
+      ["svg", "outputs/png-bytes.svg", makePng()],
+      ["gif", "outputs/png-bytes.gif", makePng()],
+      ["gif", "outputs/truncated.gif", makeGif({ frames: 2 }).subarray(0, -1)],
+      ["png", "outputs/gif-bytes.png", makeGif()],
+      ["png", "outputs/svg-bytes.png", makeSvg()],
+    ] as const) {
+      const output = await paths.resolveOutput(outputPath);
+      await assert.rejects(
+        () => publishOutput({ output, base64: Buffer.from(bytes).toString("base64"), format }),
+        (error: unknown) =>
+          error instanceof AppError &&
+          error.code === "INVALID_PROVIDER_RESPONSE" &&
+          error.message ===
+            "INVALID_PROVIDER_RESPONSE: Provider image payload failed validation",
+        outputPath,
+      );
+      await assert.rejects(() => access(output.absolutePath), { code: "ENOENT" });
+      assert.deepEqual(await readdir(output.parentPath), [], outputPath);
+    }
   });
 });

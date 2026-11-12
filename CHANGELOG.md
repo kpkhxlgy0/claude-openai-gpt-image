@@ -2,6 +2,25 @@
 
 All notable changes to this plugin are documented in this file.
 
+## [Unreleased]
+
+### Added
+
+- GPT Image 2.6 models `gpt-image-2.6-sunburst` and `gpt-image-2.6-flare` for `generate_image` and `edit_image`. Like `gpt-image-2.5-sunburst` and `gpt-image-2.5-flare`, they support `xhigh` and `max` quality and transparent backgrounds with PNG or WebP output.
+- Optional `complexity` (`low`, `medium`, or `high`) for `generate_image` and `edit_image`, accepted only with `gpt-image-2.6-sunburst` or `gpt-image-2.6-flare`; requests for it with any other model are rejected locally with `INVALID_INPUT` before any paid call. When it is omitted, no complexity field is sent and the model default applies. It is separate from `quality`.
+- SVG output with `output_format: "svg"` for `generate_image` with the 2.6 models. The returned document is validated as static vector content before it is saved; a response containing scripts, external references, or embedded raster images is rejected with `INVALID_PROVIDER_RESPONSE` and nothing is saved. SVG output takes no `output_compression` or transparent background, has no inline preview, and never reports `SIZE_MISMATCH`. `edit_image` cannot output SVG.
+- Animated GIF output with `output_format: "gif"` for `generate_image` and `edit_image` with the 2.6 models, with optional `frame_count` (2 to 16) and `frame_duration_ms` (20 to 2000), which are rejected locally for any other output format. A GIF request without `size` sends `auto`; an explicit GIF size describes one frame and must use multiples of 16 with edges up to 3840 pixels. GIF output takes no `output_compression` or transparent background, cannot be combined with `mask_path`, and reports `actual_frame_count`.
+- Markup-guided edits: `edit_image` accepts `markup_path`, a transparent PNG annotation layer with an alpha channel whose dimensions match the first input image (or are transposed when the first input image is a JPEG or WebP), with `gpt-image-2.5-sunburst`, `gpt-image-2.5-flare`, `gpt-image-2.6-sunburst`, or `gpt-image-2.6-flare`. It cannot be combined with `mask_path`.
+- Image results can report `format` `gif` or `svg` and `mime_type` `image/gif` or `image/svg+xml`. GIF and SVG files remain output-only and are rejected as edit inputs.
+
+### Changed
+
+- The default model is now `gpt-image-2.6-flare` instead of `gpt-image-2.5-flare`, and `get_status` reports it. Requests that omit `model` therefore send `model: "gpt-image-2.6-flare"` and are billed at the GPT Image 2.6 rates, which changes the cost of those calls; set `model` explicitly to use a different model. SVG output is billed for both the reference image and the SVG authoring tokens.
+
+### Verification scope
+
+Offline schema, provider-adapter, image-inspection, tool, and protocol tests use fixtures and fake provider clients. No paid image API call was made with any model, and no live provider verification was performed or claimed.
+
 ## [0.2.0] - 2026-10-03
 
 ### Added

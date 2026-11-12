@@ -113,6 +113,17 @@ const APPROVED_ENDPOINT_HOSTS = new Set([
   "secret-provider.example.invalid",
 ]);
 
+// Exact XML namespace and DTD identifier strings used by SVG output
+// validation and its tests. They name vocabularies and are never fetched. Only
+// these exact literals are exempt; any other URL on their host is reported.
+const APPROVED_ENDPOINT_LITERALS = new Set([
+  "http://www.w3.org/1999/xhtml",
+  "http://www.w3.org/1999/xlink",
+  "http://www.w3.org/2000/svg",
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd",
+  "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd",
+]);
+
 const API_KEY_PATTERN = /\bsk-[A-Za-z0-9_-]{16,}\b/;
 const SENSITIVE_ASSIGNMENT_PATTERN =
   /\b(?:OPENAI_API_KEY|openai_api_key)\b["']?\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|([^\s,}]+))/gi;
@@ -625,7 +636,9 @@ for (const relativePath of tracked) {
 
   if (shouldScanEndpointLiterals(relativePath)) {
     if (
-      findUnapprovedEndpointLiterals(text, APPROVED_ENDPOINT_HOSTS).length > 0
+      findUnapprovedEndpointLiterals(text, APPROVED_ENDPOINT_HOSTS).some(
+        (literal) => !APPROVED_ENDPOINT_LITERALS.has(literal),
+      )
     ) {
       fail(`application file contains an unapproved endpoint URL literal: ${relativePath}`);
     }

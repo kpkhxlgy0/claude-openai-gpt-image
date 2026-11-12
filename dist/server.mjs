@@ -34474,9 +34474,12 @@ import path3 from "node:path";
 
 // src/images/types.ts
 var MAX_IMAGE_BYTES = 64 * 1024 * 1024;
+var MAX_SVG_BYTES = 16 * 1024 * 1024;
+var MAX_GIF_FRAMES = 256;
 var MAX_IMAGE_EDGE = 16384;
 var MAX_IMAGE_PIXELS = 16777216;
 var MAX_DECODED_IMAGE_BYTES = 128 * 1024 * 1024;
+var MAX_GIF_TOTAL_FRAME_PIXELS = 16 * MAX_IMAGE_PIXELS;
 function assertImageDimensions(width, height, fail) {
   if (width === 0 || height === 0) fail("dimensions must be nonzero");
   if (width > MAX_IMAGE_EDGE || height > MAX_IMAGE_EDGE) {
@@ -37053,6 +37056,16 @@ function assertEditSnapshots(request) {
     }
     aggregateBytes += request.mask.sizeBytes;
   }
+  if (request.markup !== void 0) {
+    if (request.mask !== void 0) {
+      invalidInput2("Markup and mask snapshots cannot be combined");
+    }
+    assertSnapshotDescriptor(request.markup);
+    if (request.markup.info.mimeType !== "image/png") {
+      invalidInput2("Markup snapshot must be a PNG image");
+    }
+    aggregateBytes += request.markup.sizeBytes;
+  }
   if (!Number.isSafeInteger(aggregateBytes) || aggregateBytes > MAX_AGGREGATE_INPUT_BYTES) {
     invalidInput2("Input snapshots exceed the aggregate size limit");
   }
@@ -37121,13 +37134,26 @@ async function snapshotToUpload(snapshot, signal) {
   }
 }
 function addCompression(body, request) {
-  if (request.output_format !== "png" && request.output_compression !== void 0) {
+  if ((request.output_format === "jpeg" || request.output_format === "webp") && request.output_compression !== void 0) {
     body.output_compression = request.output_compression;
+  }
+}
+function addAnimation(body, request) {
+  if (request.frame_count !== void 0) {
+    body.frame_count = request.frame_count;
+  }
+  if (request.frame_duration_ms !== void 0) {
+    body.frame_duration_ms = request.frame_duration_ms;
   }
 }
 function addBackground(body, request) {
   if (request.background !== "auto") {
     body.background = request.background;
+  }
+}
+function addComplexity(body, request) {
+  if (request.complexity !== void 0) {
+    body.complexity = request.complexity;
   }
 }
 function invalidProviderResponse(requestId) {
@@ -37225,6 +37251,8 @@ var OpenAIImageClient = class {
     };
     addCompression(body, request);
     addBackground(body, request);
+    addComplexity(body, request);
+    addAnimation(body, request);
     return this.#invoke(
       () => signal === void 0 ? this.#sdk.images.generate(body) : this.#sdk.images.generate(body, { signal }),
       signal
@@ -37248,8 +37276,13 @@ var OpenAIImageClient = class {
     };
     addCompression(body, request);
     addBackground(body, request);
+    addComplexity(body, request);
+    addAnimation(body, request);
     if (request.mask !== void 0) {
       body.mask = await snapshotToUpload(request.mask, signal);
+    }
+    if (request.markup !== void 0) {
+      body.markup = await snapshotToUpload(request.markup, signal);
     }
     signal?.throwIfAborted();
     return this.#invoke(
@@ -45360,11 +45393,22 @@ var EMPTY_COMPLETION_RESULT = {
 var IMAGE_MODELS = [
   "gpt-image-2",
   "gpt-image-2.5-sunburst",
-  "gpt-image-2.5-flare"
+  "gpt-image-2.5-flare",
+  "gpt-image-2.6-sunburst",
+  "gpt-image-2.6-flare"
 ];
-var DEFAULT_IMAGE_MODEL = "gpt-image-2.5-flare";
+var DEFAULT_IMAGE_MODEL = "gpt-image-2.6-flare";
+var GPT_IMAGE_2_6_MODELS = Object.freeze([
+  "gpt-image-2.6-sunburst",
+  "gpt-image-2.6-flare"
+]);
 var IMAGE_BACKGROUNDS = ["auto", "opaque", "transparent"];
-var TRANSPARENT_BACKGROUND_MODELS = Object.freeze(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
+var TRANSPARENT_BACKGROUND_MODELS = Object.freeze([
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-flare",
+  "gpt-image-2.6-sunburst",
+  "gpt-image-2.6-flare"
+]);
 var IMAGE_QUALITIES = [
   "auto",
   "low",
@@ -45374,7 +45418,32 @@ var IMAGE_QUALITIES = [
   "max"
 ];
 var DEFAULT_IMAGE_QUALITY = "high";
-var EXTENDED_QUALITY_MODELS = Object.freeze(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
+var EXTENDED_QUALITY_MODELS = Object.freeze([
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-flare",
+  "gpt-image-2.6-sunburst",
+  "gpt-image-2.6-flare"
+]);
+var MARKUP_MODELS = Object.freeze([
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-flare",
+  "gpt-image-2.6-sunburst",
+  "gpt-image-2.6-flare"
+]);
+var IMAGE_COMPLEXITIES = ["low", "medium", "high"];
+var IMAGE_OUTPUT_FORMATS = [
+  "png",
+  "jpeg",
+  "webp",
+  "gif",
+  "svg"
+];
+var EDIT_OUTPUT_FORMATS = [
+  "png",
+  "jpeg",
+  "webp",
+  "gif"
+];
 
 // src/schemas.ts
 var PROMPT_MAX = 32e3;
@@ -45383,10 +45452,11 @@ var MAX_PIXELS = 8294400;
 var MAX_EDGE = 3840;
 var MIN_RATIO = 1 / 3;
 var MAX_RATIO = 3;
-function parseImageSize(value) {
-  if (value === "auto") {
-    return null;
-  }
+var MIN_FRAME_COUNT = 2;
+var MAX_FRAME_COUNT = 16;
+var MIN_FRAME_DURATION_MS = 20;
+var MAX_FRAME_DURATION_MS = 2e3;
+function parseSizeDimensions(value) {
   const match = /^([1-9]\d*)x([1-9]\d*)$/.exec(value);
   if (!match) {
     throw new AppError(
@@ -45411,6 +45481,13 @@ function parseImageSize(value) {
       `size edges must be at most ${MAX_EDGE} pixels`
     );
   }
+  return { width, height };
+}
+function parseImageSize(value) {
+  if (value === "auto") {
+    return null;
+  }
+  const { width, height } = parseSizeDimensions(value);
   const pixels = width * height;
   if (pixels < MIN_PIXELS || pixels > MAX_PIXELS) {
     throw new AppError(
@@ -45427,25 +45504,55 @@ function parseImageSize(value) {
   }
   return { width, height };
 }
-var sizeSchema = external_exports.string().superRefine((value, ctx) => {
-  try {
-    parseImageSize(value);
-  } catch (error51) {
-    ctx.addIssue({
-      code: "custom",
-      message: error51 instanceof AppError ? error51.message : "Invalid image size"
-    });
+function parseAnimationFrameSize(value) {
+  if (value === "auto") {
+    return null;
   }
-});
+  return parseSizeDimensions(value);
+}
 var promptSchema = external_exports.string().transform((value) => value.trim()).pipe(external_exports.string().min(1).max(PROMPT_MAX));
 var modelSchema = external_exports.enum(IMAGE_MODELS).default(DEFAULT_IMAGE_MODEL);
 var qualitySchema = external_exports.enum(IMAGE_QUALITIES).default(DEFAULT_IMAGE_QUALITY);
-var outputFormatSchema = external_exports.enum(["png", "jpeg", "webp"]).default("png");
+var sizeSchema = external_exports.string().default("1024x1024");
+var generateOutputFormatSchema = external_exports.enum(IMAGE_OUTPUT_FORMATS).default("png");
+var editOutputFormatSchema = external_exports.enum(EDIT_OUTPUT_FORMATS).default("png");
 var backgroundSchema = external_exports.enum(IMAGE_BACKGROUNDS).default("auto");
+var complexitySchema = external_exports.enum(IMAGE_COMPLEXITIES).optional();
+var frameCountSchema = external_exports.number().int().min(MIN_FRAME_COUNT).max(MAX_FRAME_COUNT).optional();
+var frameDurationSchema = external_exports.number().int().min(MIN_FRAME_DURATION_MS).max(MAX_FRAME_DURATION_MS).optional();
 var moderationSchema = external_exports.enum(["auto", "low"]).default("auto");
 var optionalPathSchema = external_exports.string().min(1).optional();
+function sizeIssueMessage(value) {
+  try {
+    if (value.output_format === "gif") {
+      parseAnimationFrameSize(value.size);
+    } else {
+      parseImageSize(value.size);
+    }
+    return void 0;
+  } catch (error51) {
+    return error51 instanceof AppError ? error51.message : "Invalid image size";
+  }
+}
+function injectGifSizeDefault(input) {
+  if (typeof input !== "object" || input === null) {
+    return input;
+  }
+  const prototype = Object.getPrototypeOf(input);
+  if (prototype !== Object.prototype && prototype !== null) {
+    return input;
+  }
+  const record2 = input;
+  if (record2.output_format !== "gif" || record2.size !== void 0) {
+    return input;
+  }
+  return { ...record2, size: "auto" };
+}
+function supportsCompression(format) {
+  return format === "jpeg" || format === "webp";
+}
 function normalizeCompression(value) {
-  if (value.output_format === "png" && value.output_compression === 0) {
+  if (!supportsCompression(value.output_format) && value.output_compression === 0) {
     const copy = { ...value };
     delete copy.output_compression;
     return copy;
@@ -45462,10 +45569,10 @@ function assertCompressionRules(value) {
       "output_compression must be an integer between 0 and 100"
     );
   }
-  if (value.output_format === "png" && value.output_compression !== 0) {
+  if (!supportsCompression(value.output_format) && value.output_compression !== 0) {
     throw new AppError(
       "INVALID_INPUT",
-      "output_compression is not supported for PNG except the ignored zero default"
+      `output_compression is not supported for ${value.output_format.toUpperCase()} except the ignored zero default`
     );
   }
 }
@@ -45479,7 +45586,7 @@ function assertBackgroundRules(value) {
       `background "transparent" requires model ${TRANSPARENT_BACKGROUND_MODELS.join(" or ")}`
     );
   }
-  if (value.output_format === "jpeg") {
+  if (value.output_format !== "png" && value.output_format !== "webp") {
     throw new AppError(
       "INVALID_INPUT",
       'background "transparent" requires output_format "png" or "webp"'
@@ -45497,42 +45604,115 @@ function assertQualityRules(value) {
     );
   }
 }
+function assertComplexityRules(value) {
+  if (value.complexity === void 0) {
+    return;
+  }
+  if (!GPT_IMAGE_2_6_MODELS.includes(value.model)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      `complexity requires model ${GPT_IMAGE_2_6_MODELS.join(" or ")}`
+    );
+  }
+}
+function assertOutputFormatRules(value) {
+  if ((value.output_format === "gif" || value.output_format === "svg") && !GPT_IMAGE_2_6_MODELS.includes(value.model)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      `output_format "${value.output_format}" requires model ${GPT_IMAGE_2_6_MODELS.join(" or ")}`
+    );
+  }
+  if (value.output_format !== "gif" && (value.frame_count !== void 0 || value.frame_duration_ms !== void 0)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      'frame_count and frame_duration_ms require output_format "gif"'
+    );
+  }
+}
+function assertMaskRules(value) {
+  if (value.output_format === "gif" && value.mask_path !== void 0) {
+    throw new AppError(
+      "INVALID_INPUT",
+      'mask_path is not supported with output_format "gif"'
+    );
+  }
+}
+function assertMarkupRules(value) {
+  if (value.markup_path === void 0) {
+    return;
+  }
+  if (value.mask_path !== void 0) {
+    throw new AppError(
+      "INVALID_INPUT",
+      "markup_path cannot be combined with mask_path"
+    );
+  }
+  if (!MARKUP_MODELS.includes(value.model)) {
+    throw new AppError(
+      "INVALID_INPUT",
+      `markup_path requires model ${MARKUP_MODELS.join(" or ")}`
+    );
+  }
+}
 var generateObjectSchema = external_exports.strictObject({
   prompt: promptSchema,
   model: modelSchema,
   quality: qualitySchema,
-  size: sizeSchema.default("1024x1024"),
-  output_format: outputFormatSchema,
+  size: sizeSchema,
+  output_format: generateOutputFormatSchema,
   output_compression: external_exports.number().int().min(0).max(100).optional(),
   background: backgroundSchema,
+  complexity: complexitySchema,
+  frame_count: frameCountSchema,
+  frame_duration_ms: frameDurationSchema,
   moderation: moderationSchema,
   output_path: optionalPathSchema,
   workspace_root: optionalPathSchema
+}).superRefine((value, ctx) => {
+  const message = sizeIssueMessage(value);
+  if (message !== void 0) {
+    ctx.addIssue({ code: "custom", path: ["size"], message });
+  }
 });
 var editObjectSchema = external_exports.strictObject({
   prompt: promptSchema,
   model: modelSchema,
   quality: qualitySchema,
-  size: sizeSchema.default("1024x1024"),
-  output_format: outputFormatSchema,
+  size: sizeSchema,
+  output_format: editOutputFormatSchema,
   output_compression: external_exports.number().int().min(0).max(100).optional(),
   background: backgroundSchema,
+  complexity: complexitySchema,
+  frame_count: frameCountSchema,
+  frame_duration_ms: frameDurationSchema,
   output_path: optionalPathSchema,
   workspace_root: optionalPathSchema,
   image_paths: external_exports.array(external_exports.string().min(1)).min(1).max(8),
-  mask_path: optionalPathSchema
+  mask_path: optionalPathSchema,
+  markup_path: optionalPathSchema
+}).superRefine((value, ctx) => {
+  const message = sizeIssueMessage(value);
+  if (message !== void 0) {
+    ctx.addIssue({ code: "custom", path: ["size"], message });
+  }
 });
 var statusSchema = external_exports.strictObject({});
-var generateImageSchema = external_exports.preprocess((input) => input, generateObjectSchema).transform((value) => {
+var generateImageSchema = external_exports.preprocess(injectGifSizeDefault, generateObjectSchema).transform((value) => {
   assertCompressionRules(value);
   assertBackgroundRules(value);
   assertQualityRules(value);
+  assertComplexityRules(value);
+  assertOutputFormatRules(value);
   return normalizeCompression(value);
 });
-var editImageSchema = external_exports.preprocess((input) => input, editObjectSchema).transform((value) => {
+var editImageSchema = external_exports.preprocess(injectGifSizeDefault, editObjectSchema).transform((value) => {
   assertCompressionRules(value);
   assertBackgroundRules(value);
   assertQualityRules(value);
+  assertComplexityRules(value);
+  assertOutputFormatRules(value);
+  assertMaskRules(value);
+  assertMarkupRules(value);
   return normalizeCompression(value);
 });
 
@@ -45554,6 +45734,747 @@ import {
 import { setTimeout as scheduleTimeout2 } from "node:timers";
 import { setTimeout as delay } from "node:timers/promises";
 import path4 from "node:path";
+
+// src/images/gif.ts
+var HEADER_BYTES = 6;
+var LOGICAL_SCREEN_END = HEADER_BYTES + 7;
+var IMAGE_DESCRIPTOR_BYTES = 10;
+var EXTENSION_INTRODUCER = 33;
+var IMAGE_SEPARATOR = 44;
+var TRAILER = 59;
+var GRAPHIC_CONTROL_LABEL = 249;
+var GRAPHIC_CONTROL_BLOCK_SIZE = 4;
+var COLOR_TABLE_FLAG = 128;
+var TRANSPARENCY_FLAG = 1;
+var MIN_LZW_CODE_SIZE = 2;
+var MAX_LZW_CODE_SIZE = 8;
+function invalidGif(message) {
+  throw new AppError("INPUT_FILE_INVALID", `Invalid GIF: ${message}`);
+}
+function colorTableBytes(packed) {
+  return (packed & COLOR_TABLE_FLAG) === 0 ? 0 : 3 * 2 ** ((packed & 7) + 1);
+}
+function skipSubBlocks(buffer, offset) {
+  let position = offset;
+  while (true) {
+    if (position >= buffer.length) invalidGif("truncated data sub-block");
+    const size = buffer[position];
+    position += 1;
+    if (size === 0) return position;
+    if (size > buffer.length - position) invalidGif("truncated data sub-block");
+    position += size;
+  }
+}
+function inspectGif(bytes) {
+  if (bytes.byteLength > MAX_IMAGE_BYTES) {
+    invalidGif("encoded image exceeds the byte limit");
+  }
+  const buffer = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  if (buffer.length < HEADER_BYTES) invalidGif("signature mismatch");
+  const signature = buffer.toString("latin1", 0, HEADER_BYTES);
+  if (signature !== "GIF87a" && signature !== "GIF89a") {
+    invalidGif("signature mismatch");
+  }
+  if (buffer.length < LOGICAL_SCREEN_END) {
+    invalidGif("truncated logical screen descriptor");
+  }
+  const width = buffer.readUInt16LE(6);
+  const height = buffer.readUInt16LE(8);
+  assertImageDimensions(width, height, invalidGif);
+  const globalColorTableEnd = LOGICAL_SCREEN_END + colorTableBytes(buffer[10]);
+  if (globalColorTableEnd > buffer.length) invalidGif("truncated global color table");
+  let offset = globalColorTableEnd;
+  let frameCount = 0;
+  let framePixels = 0;
+  let hasAlpha = false;
+  while (offset < buffer.length) {
+    const introducer = buffer[offset];
+    switch (introducer) {
+      case TRAILER:
+        if (offset !== buffer.length - 1) invalidGif("data follows the trailer");
+        if (frameCount === 0) invalidGif("no image frames");
+        return {
+          format: "gif",
+          mimeType: "image/gif",
+          width,
+          height,
+          hasAlpha,
+          frameCount
+        };
+      case EXTENSION_INTRODUCER: {
+        if (buffer.length - offset < 2) invalidGif("truncated extension block");
+        const label = buffer[offset + 1];
+        offset += 2;
+        if (label === GRAPHIC_CONTROL_LABEL) {
+          const blockEnd = offset + 1 + GRAPHIC_CONTROL_BLOCK_SIZE;
+          if (blockEnd >= buffer.length) invalidGif("truncated extension block");
+          if (buffer[offset] !== GRAPHIC_CONTROL_BLOCK_SIZE || buffer[blockEnd] !== 0) {
+            invalidGif("Graphic Control Extension is malformed");
+          }
+          if ((buffer[offset + 1] & TRANSPARENCY_FLAG) !== 0) hasAlpha = true;
+          offset = blockEnd + 1;
+        } else {
+          offset = skipSubBlocks(buffer, offset);
+        }
+        break;
+      }
+      case IMAGE_SEPARATOR: {
+        if (buffer.length - offset < IMAGE_DESCRIPTOR_BYTES) {
+          invalidGif("truncated image descriptor");
+        }
+        const left = buffer.readUInt16LE(offset + 1);
+        const top = buffer.readUInt16LE(offset + 3);
+        const frameWidth = buffer.readUInt16LE(offset + 5);
+        const frameHeight = buffer.readUInt16LE(offset + 7);
+        const packed = buffer[offset + 9];
+        if (frameWidth === 0 || frameHeight === 0) {
+          invalidGif("frame dimensions must be nonzero");
+        }
+        if (left + frameWidth > width || top + frameHeight > height) {
+          invalidGif("frame lies outside the logical screen");
+        }
+        framePixels += frameWidth * frameHeight;
+        if (framePixels > MAX_GIF_TOTAL_FRAME_PIXELS) {
+          invalidGif("frames exceed the total pixel limit");
+        }
+        offset += IMAGE_DESCRIPTOR_BYTES;
+        const localColorTableEnd = offset + colorTableBytes(packed);
+        if (localColorTableEnd > buffer.length) invalidGif("truncated local color table");
+        offset = localColorTableEnd;
+        if (offset >= buffer.length) invalidGif("truncated image data");
+        const codeSize = buffer[offset];
+        if (codeSize < MIN_LZW_CODE_SIZE || codeSize > MAX_LZW_CODE_SIZE) {
+          invalidGif("LZW minimum code size is invalid");
+        }
+        offset += 1;
+        if (offset >= buffer.length) invalidGif("truncated data sub-block");
+        if (buffer[offset] === 0) invalidGif("frame has no image data");
+        offset = skipSubBlocks(buffer, offset);
+        frameCount += 1;
+        if (frameCount > MAX_GIF_FRAMES) invalidGif("frame count exceeds the limit");
+        break;
+      }
+      default:
+        invalidGif("unknown block introducer");
+    }
+  }
+  invalidGif("missing trailer");
+}
+
+// src/images/svg.ts
+var SVG_NAMESPACE = "http://www.w3.org/2000/svg";
+var XLINK_NAMESPACE = "http://www.w3.org/1999/xlink";
+var DEFAULT_WIDTH = 300;
+var DEFAULT_HEIGHT = 150;
+var MAX_REFERENCE_NAME_LENGTH = 32;
+var MAX_XML_DECLARATION_LENGTH = 256;
+var MAX_LENGTH_VALUE_LENGTH = 64;
+var MAX_VIEW_BOX_LENGTH = 256;
+var MAX_DOCTYPE_LENGTH = 1024;
+var MAX_ELEMENT_DEPTH = 512;
+var LESS_THAN = 60;
+var GREATER_THAN = 62;
+var SLASH = 47;
+var EQUALS = 61;
+var DOUBLE_QUOTE = 34;
+var APOSTROPHE = 39;
+var NUMBER_SIGN = 35;
+var SEMICOLON = 59;
+var ALLOWED_ELEMENTS = /* @__PURE__ */ new Set([
+  "svg",
+  "g",
+  "defs",
+  "symbol",
+  "use",
+  "switch",
+  "a",
+  "view",
+  "path",
+  "rect",
+  "circle",
+  "ellipse",
+  "line",
+  "polyline",
+  "polygon",
+  "text",
+  "tspan",
+  "textpath",
+  "title",
+  "desc",
+  "metadata",
+  "style",
+  "lineargradient",
+  "radialgradient",
+  "stop",
+  "pattern",
+  "clippath",
+  "mask",
+  "marker",
+  "filter",
+  "feblend",
+  "fecolormatrix",
+  "fecomponenttransfer",
+  "fecomposite",
+  "feconvolvematrix",
+  "fediffuselighting",
+  "fedisplacementmap",
+  "fedistantlight",
+  "fedropshadow",
+  "feflood",
+  "fefunca",
+  "fefuncb",
+  "fefuncg",
+  "fefuncr",
+  "fegaussianblur",
+  "femerge",
+  "femergenode",
+  "femorphology",
+  "feoffset",
+  "fepointlight",
+  "fespecularlighting",
+  "fespotlight",
+  "fetile",
+  "feturbulence"
+]);
+var TEXT_ONLY_ELEMENTS = /* @__PURE__ */ new Set(["style", "title", "desc", "metadata"]);
+var PROSE_ATTRIBUTE_PATTERN = /^(?:aria|data)-[a-z0-9._-]+$/i;
+var STANDARD_DOCTYPES = /* @__PURE__ */ new Set([
+  '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">',
+  '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.0//EN" "http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd">'
+]);
+var REFERENCE_ATTRIBUTES = /* @__PURE__ */ new Set(["href", "src"]);
+var PREDEFINED_ENTITIES = /* @__PURE__ */ new Map([
+  ["lt", "<"],
+  ["gt", ">"],
+  ["amp", "&"],
+  ["quot", '"'],
+  ["apos", "'"]
+]);
+var NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9._-]*(?::[A-Za-z_][A-Za-z0-9._-]*)?$/;
+var XML_DECLARATION_PATTERN = /^[ \t\r\n]+version[ \t\r\n]*=[ \t\r\n]*(?:"1\.[0-9]+"|'1\.[0-9]+')(?:[ \t\r\n]+encoding[ \t\r\n]*=[ \t\r\n]*(?:"([A-Za-z][A-Za-z0-9._-]*)"|'([A-Za-z][A-Za-z0-9._-]*)'))?(?:[ \t\r\n]+standalone[ \t\r\n]*=[ \t\r\n]*(?:"(?:yes|no)"|'(?:yes|no)'))?[ \t\r\n]*$/;
+var UTF8_ENCODING_LABELS = /* @__PURE__ */ new Set(["utf-8", "utf8"]);
+var LENGTH_PATTERN = /^(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]+)?(?:px)?$/i;
+var NUMBER_PATTERN = /^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:e[+-]?[0-9]+)?$/i;
+var DECIMAL_PATTERN = /^[0-9]+$/;
+var HEXADECIMAL_PATTERN = /^[0-9A-Fa-f]+$/;
+function invalidSvg(message) {
+  throw new AppError("INPUT_FILE_INVALID", `Invalid SVG: ${message}`);
+}
+function isXmlWhitespace(code) {
+  return code === 32 || code === 9 || code === 10 || code === 13;
+}
+function isNameCharacter(code) {
+  return code >= 97 && code <= 122 || code >= 65 && code <= 90 || code >= 48 && code <= 57 || code === 95 || code === 45 || code === 46 || code === 58;
+}
+function isXmlCharacter(codePoint) {
+  return codePoint === 9 || codePoint === 10 || codePoint === 13 || codePoint >= 32 && codePoint <= 55295 || codePoint >= 57344 && codePoint <= 65533 || codePoint >= 65536 && codePoint <= 1114111;
+}
+function isIgnoredForChecks(code) {
+  return code <= 32 || code >= 127 && code <= 160 || code === 5760 || code >= 8192 && code <= 8202 || code === 8232 || code === 8233 || code === 8239 || code === 8287 || code === 12288 || code === 65279;
+}
+function isAllXmlWhitespace(value) {
+  for (let index = 0; index < value.length; index += 1) {
+    if (!isXmlWhitespace(value.charCodeAt(index))) return false;
+  }
+  return true;
+}
+function trimXmlWhitespace(value) {
+  let start = 0;
+  let end = value.length;
+  while (start < end && isXmlWhitespace(value.charCodeAt(start))) start += 1;
+  while (end > start && isXmlWhitespace(value.charCodeAt(end - 1))) end -= 1;
+  return value.slice(start, end);
+}
+function localName(name) {
+  const colon = name.indexOf(":");
+  return colon < 0 ? name : name.slice(colon + 1);
+}
+function collapseXmlWhitespace(value) {
+  let collapsed = "";
+  let inWhitespace = false;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (isXmlWhitespace(code)) {
+      if (!inWhitespace) collapsed += " ";
+      inWhitespace = true;
+    } else {
+      collapsed += value[index];
+      inWhitespace = false;
+    }
+  }
+  return collapsed;
+}
+function assertAllowedCharacters(text) {
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code < 32 && code !== 9 && code !== 10 && code !== 13) {
+      invalidSvg("content contains a forbidden control character");
+    }
+    if (code === 65534 || code === 65535) {
+      invalidSvg("content contains a non-XML character");
+    }
+  }
+}
+var UTF16LE_DECODER = new TextDecoder("utf-16le", { ignoreBOM: true });
+var CodeUnitBuilder = class {
+  #bytes;
+  #length = 0;
+  constructor(maxCodeUnits) {
+    this.#bytes = new Uint8Array(maxCodeUnits * 2);
+  }
+  append(code) {
+    this.#bytes[this.#length] = code & 255;
+    this.#bytes[this.#length + 1] = code >>> 8;
+    this.#length += 2;
+  }
+  appendRange(value, start, end) {
+    for (let index = start; index < end; index += 1) this.append(value.charCodeAt(index));
+  }
+  toString() {
+    return UTF16LE_DECODER.decode(this.#bytes.subarray(0, this.#length));
+  }
+};
+function decodeCharacterReference(name) {
+  const hexadecimal = name.startsWith("#x");
+  const digits = name.slice(hexadecimal ? 2 : 1);
+  const pattern = hexadecimal ? HEXADECIMAL_PATTERN : DECIMAL_PATTERN;
+  if (!pattern.test(digits)) invalidSvg("character reference is invalid");
+  const codePoint = Number.parseInt(digits, hexadecimal ? 16 : 10);
+  if (!isXmlCharacter(codePoint)) invalidSvg("character reference is invalid");
+  return codePoint;
+}
+function decodeReferences(raw) {
+  let ampersand = raw.indexOf("&");
+  if (ampersand < 0) return raw;
+  const decoded = new CodeUnitBuilder(raw.length);
+  let start = 0;
+  while (ampersand >= 0) {
+    decoded.appendRange(raw, start, ampersand);
+    const isCharacterReference = raw.charCodeAt(ampersand + 1) === NUMBER_SIGN;
+    const limit2 = Math.min(raw.length, ampersand + 2 + MAX_REFERENCE_NAME_LENGTH);
+    let semicolon = -1;
+    for (let index = ampersand + 1; index < limit2; index += 1) {
+      if (raw.charCodeAt(index) === SEMICOLON) {
+        semicolon = index;
+        break;
+      }
+    }
+    if (semicolon < 0) {
+      invalidSvg(
+        isCharacterReference ? "character reference is invalid" : "entity reference is not allowed"
+      );
+    }
+    const name = raw.slice(ampersand + 1, semicolon);
+    if (isCharacterReference) {
+      const codePoint = decodeCharacterReference(name);
+      if (codePoint > 65535) {
+        const offset = codePoint - 65536;
+        decoded.append(55296 + (offset >>> 10));
+        decoded.append(56320 + (offset & 1023));
+      } else {
+        decoded.append(codePoint);
+      }
+    } else {
+      const replacement = PREDEFINED_ENTITIES.get(name);
+      if (replacement === void 0) invalidSvg("entity reference is not allowed");
+      decoded.append(replacement.charCodeAt(0));
+    }
+    start = semicolon + 1;
+    ampersand = raw.indexOf("&", start);
+  }
+  decoded.appendRange(raw, start, raw.length);
+  return decoded.toString();
+}
+function isAsciiWhitespaceOrControl(code) {
+  return code <= 32;
+}
+function removeCharacters(value, isRemoved) {
+  let removedAny = false;
+  for (let index = 0; index < value.length; index += 1) {
+    if (isRemoved(value.charCodeAt(index))) {
+      removedAny = true;
+      break;
+    }
+  }
+  if (!removedAny) return value.toLowerCase();
+  const kept = new CodeUnitBuilder(value.length);
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (!isRemoved(code)) kept.append(code);
+  }
+  return kept.toString().toLowerCase();
+}
+function isCssNameCharacter(code) {
+  return code >= 97 && code <= 122 || code >= 65 && code <= 90 || code >= 48 && code <= 57 || code === 45 || code === 95 || code >= 128;
+}
+function assertNoFetchFunctions(value, where) {
+  const lower = value.toLowerCase();
+  for (const name of ["src(", "image("]) {
+    let index = lower.indexOf(name);
+    while (index >= 0) {
+      if (index === 0 || !isCssNameCharacter(lower.charCodeAt(index - 1))) {
+        invalidSvg(`${where} contains an image() or src() reference`);
+      }
+      index = lower.indexOf(name, index + 1);
+    }
+  }
+}
+function assertFragmentUrls(normalized, where) {
+  let url2 = normalized.indexOf("url(");
+  while (url2 >= 0) {
+    let target = url2 + 4;
+    const quote = normalized.charCodeAt(target);
+    if (quote === DOUBLE_QUOTE || quote === APOSTROPHE) target += 1;
+    if (normalized.charCodeAt(target) !== NUMBER_SIGN) {
+      invalidSvg(`${where} contains an external url() reference`);
+    }
+    url2 = normalized.indexOf("url(", target);
+  }
+}
+function assertNoActiveContent(value, where) {
+  const normalized = removeCharacters(value, isIgnoredForChecks);
+  if (normalized.includes("javascript:") || normalized.includes("vbscript:")) {
+    invalidSvg(`${where} contains a script URL`);
+  }
+  if (normalized.includes("@import")) invalidSvg(`${where} contains an @import rule`);
+  if (normalized.includes("image-set(")) {
+    invalidSvg(`${where} contains an image-set() reference`);
+  }
+  if (normalized.includes("\\")) invalidSvg(`${where} contains a CSS escape`);
+  assertNoFetchFunctions(value, where);
+  assertFragmentUrls(normalized, where);
+  assertFragmentUrls(removeCharacters(value, isAsciiWhitespaceOrControl), where);
+}
+function isSameDocumentReference(value) {
+  let start = 0;
+  while (start < value.length && value.charCodeAt(start) <= 32) start += 1;
+  return value.charCodeAt(start) === NUMBER_SIGN;
+}
+function isProseAttribute(name) {
+  return PROSE_ATTRIBUTE_PATTERN.test(name) || name.toLowerCase() === "xlink:title";
+}
+function assertAllowedAttribute(name, value) {
+  const lowerName = name.toLowerCase();
+  const lowerLocalName = localName(lowerName);
+  if (lowerName === "xmlns") {
+    if (value !== SVG_NAMESPACE) {
+      invalidSvg("default namespace declaration must name the SVG namespace");
+    }
+  } else if (lowerName.startsWith("xmlns:")) {
+    if (value !== SVG_NAMESPACE && value !== XLINK_NAMESPACE) {
+      invalidSvg("namespace declaration is not allowed");
+    }
+  }
+  if (lowerName === "xml:base") invalidSvg("xml:base is not allowed");
+  if (lowerName.startsWith("on") || lowerLocalName.startsWith("on")) {
+    invalidSvg("event handler attributes are not allowed");
+  }
+  if (lowerLocalName === "ping") invalidSvg("ping is not allowed");
+  if (REFERENCE_ATTRIBUTES.has(lowerLocalName) && !isSameDocumentReference(value)) {
+    invalidSvg("only same-document references are allowed");
+  }
+  if (isProseAttribute(name)) return;
+  assertNoActiveContent(value, "attribute value");
+}
+function assertAllowedElement(tag) {
+  if (!ALLOWED_ELEMENTS.has(localName(tag.name).toLowerCase())) {
+    invalidSvg("element is not allowed");
+  }
+  for (const [name, value] of tag.attributes) {
+    assertAllowedAttribute(name, value);
+  }
+}
+var SvgScanner = class {
+  #text;
+  #position = 0;
+  constructor(text) {
+    this.#text = text;
+  }
+  scan() {
+    const text = this.#text;
+    this.#skipXmlDeclaration();
+    let rootAttributes;
+    let rootClosed = false;
+    let doctypeSeen = false;
+    const openElements = [];
+    let textOnly;
+    while (this.#position < text.length) {
+      if (text.charCodeAt(this.#position) !== LESS_THAN) {
+        const next = text.indexOf("<", this.#position);
+        const end = next < 0 ? text.length : next;
+        const run = text.slice(this.#position, end);
+        this.#position = end;
+        if (openElements.length === 0) {
+          if (!isAllXmlWhitespace(run)) {
+            invalidSvg("content is not allowed outside the root element");
+          }
+          continue;
+        }
+        if (run.includes("]]>")) invalidSvg("text contains ]]>");
+        const decoded = decodeReferences(run);
+        textOnly?.styleText?.push(decoded);
+        continue;
+      }
+      if (text.startsWith("<!--", this.#position)) {
+        this.#skipComment();
+        continue;
+      }
+      if (text.startsWith("<![CDATA[", this.#position)) {
+        if (openElements.length === 0) {
+          invalidSvg("CDATA is only allowed inside the root element");
+        }
+        const content = this.#readCdata();
+        if (textOnly !== void 0) {
+          if (textOnly.styleText === void 0 && content.includes("<")) {
+            invalidSvg("CDATA in a text-only element must not contain <");
+          }
+          textOnly.styleText?.push(content);
+        }
+        continue;
+      }
+      if (text.startsWith("<!DOCTYPE", this.#position) && rootAttributes === void 0) {
+        if (doctypeSeen) invalidSvg("document type declaration must appear at most once");
+        this.#skipStandardDoctype();
+        doctypeSeen = true;
+        continue;
+      }
+      if (text.startsWith("<!", this.#position)) {
+        invalidSvg("markup declarations are not allowed");
+      }
+      if (text.startsWith("<?", this.#position)) {
+        invalidSvg("processing instructions are not allowed");
+      }
+      if (text.startsWith("</", this.#position)) {
+        if (openElements.length === 0) {
+          invalidSvg("content is not allowed outside the root element");
+        }
+        const name = this.#readEndTag();
+        if (openElements.pop() !== name) {
+          invalidSvg("end tag does not match the open element");
+        }
+        if (textOnly?.styleText !== void 0) {
+          assertNoActiveContent(textOnly.styleText.join(""), "style content");
+        }
+        textOnly = void 0;
+        if (openElements.length === 0) rootClosed = true;
+        continue;
+      }
+      if (rootClosed) invalidSvg("only one root element is allowed");
+      if (textOnly !== void 0) invalidSvg(`${textOnly.name} element must contain only text`);
+      if (openElements.length >= MAX_ELEMENT_DEPTH) invalidSvg("elements are nested too deeply");
+      const tag = this.#readStartTag();
+      if (rootAttributes === void 0) {
+        if (tag.name !== "svg") {
+          invalidSvg("root element must be an unprefixed svg element");
+        }
+        rootAttributes = tag.attributes;
+      }
+      assertAllowedElement(tag);
+      if (tag.selfClosing) {
+        if (openElements.length === 0) rootClosed = true;
+        continue;
+      }
+      openElements.push(tag.name);
+      const lowerLocalName = localName(tag.name).toLowerCase();
+      if (TEXT_ONLY_ELEMENTS.has(lowerLocalName)) {
+        textOnly = {
+          name: lowerLocalName,
+          styleText: lowerLocalName === "style" ? [] : void 0
+        };
+      }
+    }
+    if (rootAttributes === void 0) invalidSvg("missing root element");
+    if (openElements.length > 0) invalidSvg("element is not closed");
+    return rootAttributes;
+  }
+  #skipXmlDeclaration() {
+    const text = this.#text;
+    if (!text.startsWith("<?xml") || !isXmlWhitespace(text.charCodeAt(5))) return;
+    const end = text.indexOf("?>", 5);
+    if (end < 0 || end - 5 > MAX_XML_DECLARATION_LENGTH) {
+      invalidSvg("XML declaration is malformed");
+    }
+    const match = XML_DECLARATION_PATTERN.exec(text.slice(5, end));
+    if (match === null) invalidSvg("XML declaration is malformed");
+    const encoding = match[1] ?? match[2];
+    if (encoding !== void 0 && !UTF8_ENCODING_LABELS.has(encoding.toLowerCase())) {
+      invalidSvg("XML declaration must declare UTF-8 encoding");
+    }
+    this.#position = end + 2;
+  }
+  /**
+   * Accepts one of the two standard SVG document type declarations, compared
+   * after collapsing whitespace. Internal subsets and other identifiers are
+   * rejected.
+   */
+  #skipStandardDoctype() {
+    const text = this.#text;
+    const end = text.indexOf(">", this.#position);
+    if (end < 0 || end - this.#position > MAX_DOCTYPE_LENGTH || !STANDARD_DOCTYPES.has(collapseXmlWhitespace(text.slice(this.#position, end + 1)))) {
+      invalidSvg("only the standard SVG 1.0 or 1.1 document type declaration is allowed");
+    }
+    this.#position = end + 1;
+  }
+  #skipComment() {
+    const text = this.#text;
+    const bodyStart = this.#position + 4;
+    const end = text.indexOf("-->", bodyStart);
+    const closesEarlyInHtml = text.charCodeAt(bodyStart) === GREATER_THAN || text.startsWith("->", bodyStart);
+    if (end < 0 || closesEarlyInHtml || text.indexOf("--", bodyStart) !== end) {
+      invalidSvg("comment is malformed");
+    }
+    this.#position = end + 3;
+  }
+  #readCdata() {
+    const text = this.#text;
+    const contentStart = this.#position + 9;
+    const end = text.indexOf("]]>", contentStart);
+    if (end < 0) invalidSvg("CDATA section is not terminated");
+    this.#position = end + 3;
+    return text.slice(contentStart, end);
+  }
+  #skipWhitespace() {
+    const start = this.#position;
+    while (this.#position < this.#text.length && isXmlWhitespace(this.#text.charCodeAt(this.#position))) {
+      this.#position += 1;
+    }
+    return this.#position - start;
+  }
+  #readName() {
+    const text = this.#text;
+    const start = this.#position;
+    while (this.#position < text.length && isNameCharacter(text.charCodeAt(this.#position))) {
+      this.#position += 1;
+    }
+    const name = text.slice(start, this.#position);
+    if (!NAME_PATTERN.test(name)) invalidSvg("name is malformed");
+    return name;
+  }
+  #readStartTag() {
+    const text = this.#text;
+    this.#position += 1;
+    const name = this.#readName();
+    const attributes = /* @__PURE__ */ new Map();
+    while (true) {
+      const whitespace = this.#skipWhitespace();
+      const code = text.charCodeAt(this.#position);
+      if (code === GREATER_THAN) {
+        this.#position += 1;
+        return { name, attributes, selfClosing: false };
+      }
+      if (code === SLASH) {
+        if (text.charCodeAt(this.#position + 1) !== GREATER_THAN) {
+          invalidSvg("tag is malformed");
+        }
+        this.#position += 2;
+        return { name, attributes, selfClosing: true };
+      }
+      if (whitespace === 0) invalidSvg("tag is malformed");
+      const attributeName = this.#readName();
+      this.#skipWhitespace();
+      if (text.charCodeAt(this.#position) !== EQUALS) invalidSvg("tag is malformed");
+      this.#position += 1;
+      this.#skipWhitespace();
+      const quote = text.charCodeAt(this.#position);
+      if (quote !== DOUBLE_QUOTE && quote !== APOSTROPHE) {
+        invalidSvg("attribute value must be quoted");
+      }
+      const valueStart = this.#position + 1;
+      const valueEnd = text.indexOf(quote === DOUBLE_QUOTE ? '"' : "'", valueStart);
+      if (valueEnd < 0) invalidSvg("tag is malformed");
+      const raw = text.slice(valueStart, valueEnd);
+      if (raw.includes("<")) invalidSvg("attribute value contains a raw less-than sign");
+      if (attributes.has(attributeName)) invalidSvg("duplicate attribute");
+      attributes.set(attributeName, decodeReferences(raw));
+      this.#position = valueEnd + 1;
+    }
+  }
+  #readEndTag() {
+    this.#position += 2;
+    const name = this.#readName();
+    this.#skipWhitespace();
+    if (this.#text.charCodeAt(this.#position) !== GREATER_THAN) {
+      invalidSvg("tag is malformed");
+    }
+    this.#position += 1;
+    return name;
+  }
+};
+function parseLength(value) {
+  if (value === void 0) return void 0;
+  const trimmed = trimXmlWhitespace(value);
+  if (trimmed.length > MAX_LENGTH_VALUE_LENGTH || !LENGTH_PATTERN.test(trimmed)) {
+    return void 0;
+  }
+  const lower = trimmed.toLowerCase();
+  return Number(lower.endsWith("px") ? lower.slice(0, -2) : lower);
+}
+function parseViewBoxSize(value) {
+  if (value === void 0) return void 0;
+  const trimmed = trimXmlWhitespace(value);
+  if (trimmed.length === 0 || trimmed.length > MAX_VIEW_BOX_LENGTH) return void 0;
+  const parts = trimmed.split(/[ \t\r\n,]+/);
+  if (parts.length !== 4 || !parts.every((part) => NUMBER_PATTERN.test(part))) {
+    return void 0;
+  }
+  return [Number(parts[2]), Number(parts[3])];
+}
+function toPixels(value) {
+  if (!Number.isFinite(value)) invalidSvg("dimensions are not finite");
+  const rounded = Math.max(1, Math.round(value));
+  if (!Number.isSafeInteger(rounded)) invalidSvg("dimensions exceed the supported range");
+  return rounded;
+}
+function svgDimensions(attributes) {
+  const width = parseLength(attributes.get("width"));
+  const height = parseLength(attributes.get("height"));
+  if (width !== void 0 && height !== void 0) {
+    return { width: toPixels(width), height: toPixels(height) };
+  }
+  const viewBox = parseViewBoxSize(attributes.get("viewBox"));
+  if (viewBox !== void 0) {
+    return { width: toPixels(viewBox[0]), height: toPixels(viewBox[1]) };
+  }
+  return { width: DEFAULT_WIDTH, height: DEFAULT_HEIGHT };
+}
+function inspectSvg(bytes) {
+  if (bytes.byteLength > MAX_SVG_BYTES) invalidSvg("document exceeds the byte limit");
+  let text;
+  try {
+    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    invalidSvg("content is not valid UTF-8");
+  }
+  assertAllowedCharacters(text);
+  const rootAttributes = new SvgScanner(text).scan();
+  const { width, height } = svgDimensions(rootAttributes);
+  return {
+    format: "svg",
+    mimeType: "image/svg+xml",
+    width,
+    height,
+    hasAlpha: true
+  };
+}
+
+// src/images/inspect-output.ts
+async function inspectOutputImage(bytes, format) {
+  switch (format) {
+    case "png":
+    case "jpeg":
+    case "webp":
+      return inspectImage(bytes, format);
+    case "gif":
+      return inspectGif(bytes);
+    case "svg":
+      return inspectSvg(bytes);
+    default: {
+      const unreachable = format;
+      void unreachable;
+      throw new AppError("INPUT_FILE_INVALID", "Unsupported output image format");
+    }
+  }
+}
 
 // src/images/strict-base64.ts
 var BASE64_PATTERN = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
@@ -45624,7 +46545,7 @@ function pathFailure(message, cause) {
 }
 function assertOutputExtension(output, format) {
   const extension = path4.extname(output.absolutePath).toLowerCase();
-  const matches = format === "png" && extension === ".png" || format === "webp" && extension === ".webp" || format === "jpeg" && (extension === ".jpeg" || extension === ".jpg");
+  const matches = format === "png" && extension === ".png" || format === "webp" && extension === ".webp" || format === "jpeg" && (extension === ".jpeg" || extension === ".jpg") || format === "gif" && extension === ".gif" || format === "svg" && extension === ".svg";
   if (!matches) {
     throw new AppError(
       "INVALID_INPUT",
@@ -45765,7 +46686,7 @@ async function validateProviderSnapshot(tempPath, format) {
     );
   }
   try {
-    return await inspectImage(storedBytes, format);
+    return await inspectOutputImage(storedBytes, format);
   } catch (error51) {
     if (error51 instanceof AppError && error51.code === "INPUT_FILE_INVALID") {
       throw new AppError(
@@ -46293,7 +47214,7 @@ function selectOutputPath(requestedPath, format, operations) {
 }
 function assertOutputFormat(output, format) {
   const extension = path7.extname(output.absolutePath).toLowerCase();
-  const valid = format === "png" && extension === ".png" || format === "webp" && extension === ".webp" || format === "jpeg" && (extension === ".jpeg" || extension === ".jpg");
+  const valid = format === "png" && extension === ".png" || format === "webp" && extension === ".webp" || format === "jpeg" && (extension === ".jpeg" || extension === ".jpg") || format === "gif" && extension === ".gif" || format === "svg" && extension === ".svg";
   if (!valid) {
     throw new AppError(
       "INVALID_INPUT",
@@ -46363,18 +47284,48 @@ function copyUsage(value) {
     ...outputDetails === void 0 ? {} : { output_tokens_details: outputDetails }
   };
 }
+function requestedDimensions(info, requestedSize) {
+  try {
+    switch (info.format) {
+      case "svg":
+        return null;
+      case "gif":
+        return parseAnimationFrameSize(requestedSize);
+      default:
+        return parseImageSize(requestedSize);
+    }
+  } catch {
+    return null;
+  }
+}
+function previewMimeType(info) {
+  switch (info.mimeType) {
+    case "image/png":
+    case "image/jpeg":
+    case "image/webp":
+    case "image/gif":
+      return info.mimeType;
+    default:
+      return void 0;
+  }
+}
 function collectWarnings(options) {
   const warnings = [...options.published.warnings];
-  const requested = parseImageSize(options.requestedSize);
+  const requested = requestedDimensions(
+    options.published.info,
+    options.requestedSize
+  );
   if (requested !== null && (requested.width !== options.published.info.width || requested.height !== options.published.info.height)) {
     warnings.push("SIZE_MISMATCH");
   }
   return warnings;
 }
 function buildImageToolOutput(options) {
-  const previewIncluded = options.published.sizeBytes <= INLINE_PREVIEW_MAX_BYTES;
+  const previewMime = previewMimeType(options.published.info);
+  const previewIncluded = previewMime !== void 0 && options.published.sizeBytes <= INLINE_PREVIEW_MAX_BYTES;
   const requestId = sanitizeRequestId(options.providerImage.requestId);
   const usage = copyUsage(options.providerImage.usage);
+  const frameCount = options.published.info.frameCount;
   return {
     model: options.model,
     workspace_root: options.output.root.canonicalPath,
@@ -46383,6 +47334,7 @@ function buildImageToolOutput(options) {
     requested_size: options.requestedSize,
     actual_width: options.published.info.width,
     actual_height: options.published.info.height,
+    ...frameCount === void 0 ? {} : { actual_frame_count: frameCount },
     format: options.published.info.format,
     mime_type: options.published.info.mimeType,
     size_bytes: options.published.sizeBytes,
@@ -46394,7 +47346,7 @@ function buildImageToolOutput(options) {
     ...previewIncluded ? {
       preview: {
         data: options.providerImage.base64,
-        mimeType: options.published.info.mimeType
+        mimeType: previewMime
       }
     } : {}
   };
@@ -46419,6 +47371,7 @@ function imageStructured(output) {
     requested_size: output.requested_size,
     actual_width: output.actual_width,
     actual_height: output.actual_height,
+    ...output.actual_frame_count === void 0 ? {} : { actual_frame_count: output.actual_frame_count },
     format: output.format,
     mime_type: output.mime_type,
     size_bytes: output.size_bytes,
@@ -46446,10 +47399,12 @@ function toMcpSuccess(output) {
     };
   }
   const warningSuffix = output.warnings.length === 0 ? "" : ` Warnings: ${output.warnings.join(", ")}.`;
+  const frameCount = output.actual_frame_count;
+  const frameDetail = output.format === "gif" && frameCount !== void 0 ? ` ${frameCount} ${frameCount === 1 ? "frame" : "frames"},` : "";
   const content = [
     {
       type: "text",
-      text: `Saved ${output.model} image to ${formatUntrustedInlineData(output.relative_path)} (${output.actual_width}x${output.actual_height}, ${output.format}, ${output.size_bytes} bytes).${warningSuffix}`
+      text: `Saved ${output.model} image to ${formatUntrustedInlineData(output.relative_path)} (${output.actual_width}x${output.actual_height}, ${output.format},${frameDetail} ${output.size_bytes} bytes).${warningSuffix}`
     }
   ];
   if (output.preview_included && output.preview !== void 0) {
@@ -46510,12 +47465,46 @@ function assertMaskValid(images, mask) {
     );
   }
 }
+function assertMarkupValid(images, markup) {
+  const first = images[0];
+  if (first === void 0) {
+    throw new AppError(
+      "INTERNAL_ERROR",
+      "Input snapshots were not prepared correctly"
+    );
+  }
+  if (markup.info.format !== "png" || markup.info.mimeType !== "image/png") {
+    throw new AppError("INPUT_FILE_INVALID", "Edit markup must be a PNG image");
+  }
+  if (!markup.info.hasAlpha) {
+    throw new AppError(
+      "INPUT_FILE_INVALID",
+      "Edit markup PNG must contain an alpha channel"
+    );
+  }
+  const { width, height } = markup.info;
+  const matchesStored = width === first.info.width && height === first.info.height;
+  const mayBeRotated = first.info.format === "jpeg" || first.info.format === "webp";
+  const matchesTransposed = mayBeRotated && width === first.info.height && height === first.info.width;
+  if (!matchesStored && !matchesTransposed) {
+    throw new AppError(
+      "INPUT_FILE_INVALID",
+      "Edit markup dimensions must match the first input image"
+    );
+  }
+}
 async function editImage(input, context, signal) {
   signal?.throwIfAborted();
   assertImageCount(input);
   const provider = requireImageProvider(context);
   const operations = getToolOperations(context);
-  const inputPaths = input.mask_path === void 0 ? input.image_paths : [...input.image_paths, input.mask_path];
+  const maskIndex = input.mask_path === void 0 ? void 0 : input.image_paths.length;
+  const markupIndex = input.markup_path === void 0 ? void 0 : input.image_paths.length + (maskIndex === void 0 ? 0 : 1);
+  const inputPaths = [
+    ...input.image_paths,
+    ...input.mask_path === void 0 ? [] : [input.mask_path],
+    ...input.markup_path === void 0 ? [] : [input.markup_path]
+  ];
   const resolvedInputs = await Promise.all(
     inputPaths.map(
       (inputPath) => operations.paths.resolveInput(inputPath, input.workspace_root)
@@ -46523,7 +47512,8 @@ async function editImage(input, context, signal) {
   );
   signal?.throwIfAborted();
   const resolvedImages = resolvedInputs.slice(0, input.image_paths.length);
-  const resolvedMask = input.mask_path === void 0 ? void 0 : resolvedInputs[input.image_paths.length];
+  const resolvedMask = maskIndex === void 0 ? void 0 : resolvedInputs[maskIndex];
+  const resolvedMarkup = markupIndex === void 0 ? void 0 : resolvedInputs[markupIndex];
   const requestedOutputPath = selectOutputPath(
     input.output_path,
     input.output_format,
@@ -46539,7 +47529,7 @@ async function editImage(input, context, signal) {
   )) {
     throw new AppError(
       "INVALID_INPUT",
-      "Output path must not identify an edit input or mask"
+      "Output path must not identify an edit input, mask, or markup layer"
     );
   }
   return context.paidCallGate.runExclusive(async () => {
@@ -46570,13 +47560,22 @@ async function editImage(input, context, signal) {
         0,
         resolvedImages.length
       );
-      const maskSnapshot = resolvedMask === void 0 ? void 0 : snapshotSet.snapshots[resolvedImages.length];
+      const maskSnapshot = maskIndex === void 0 ? void 0 : snapshotSet.snapshots[maskIndex];
       if (maskSnapshot !== void 0) {
         assertMaskValid(imageSnapshots, maskSnapshot);
       } else if (resolvedMask !== void 0) {
         throw new AppError(
           "INTERNAL_ERROR",
           "Mask snapshot was not prepared correctly"
+        );
+      }
+      const markupSnapshot = markupIndex === void 0 ? void 0 : snapshotSet.snapshots[markupIndex];
+      if (markupSnapshot !== void 0) {
+        assertMarkupValid(imageSnapshots, markupSnapshot);
+      } else if (resolvedMarkup !== void 0) {
+        throw new AppError(
+          "INTERNAL_ERROR",
+          "Markup snapshot was not prepared correctly"
         );
       }
       const request = {
@@ -46587,8 +47586,12 @@ async function editImage(input, context, signal) {
         output_format: input.output_format,
         ...input.output_compression === void 0 ? {} : { output_compression: input.output_compression },
         background: input.background,
+        ...input.complexity === void 0 ? {} : { complexity: input.complexity },
+        ...input.frame_count === void 0 ? {} : { frame_count: input.frame_count },
+        ...input.frame_duration_ms === void 0 ? {} : { frame_duration_ms: input.frame_duration_ms },
         images: imageSnapshots,
-        ...maskSnapshot === void 0 ? {} : { mask: maskSnapshot }
+        ...maskSnapshot === void 0 ? {} : { mask: maskSnapshot },
+        ...markupSnapshot === void 0 ? {} : { markup: markupSnapshot }
       };
       signal?.throwIfAborted();
       const providerImage = await provider.edit(request, signal);
@@ -46663,6 +47666,9 @@ async function generateImage(input, context, signal) {
     output_format: input.output_format,
     ...input.output_compression === void 0 ? {} : { output_compression: input.output_compression },
     background: input.background,
+    ...input.complexity === void 0 ? {} : { complexity: input.complexity },
+    ...input.frame_count === void 0 ? {} : { frame_count: input.frame_count },
+    ...input.frame_duration_ms === void 0 ? {} : { frame_duration_ms: input.frame_duration_ms },
     moderation: input.moderation
   };
   return context.paidCallGate.runExclusive(async () => {
@@ -46765,8 +47771,15 @@ var imageSuccessOutputSchema = external_exports.strictObject({
   requested_size: external_exports.string(),
   actual_width: external_exports.number().int().positive(),
   actual_height: external_exports.number().int().positive(),
-  format: external_exports.enum(["png", "jpeg", "webp"]),
-  mime_type: external_exports.enum(["image/png", "image/jpeg", "image/webp"]),
+  actual_frame_count: external_exports.number().int().positive().optional(),
+  format: external_exports.enum(IMAGE_OUTPUT_FORMATS),
+  mime_type: external_exports.enum([
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml"
+  ]),
   size_bytes: external_exports.number().int().nonnegative(),
   quality: external_exports.enum(IMAGE_QUALITIES),
   preview_included: external_exports.boolean(),
