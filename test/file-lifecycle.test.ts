@@ -34,6 +34,7 @@ import {
 } from "../src/files/workspace-paths.ts";
 import { WorkspaceRootRegistry } from "../src/files/workspace-roots.ts";
 import {
+  corruptWebPBitstream,
   makeBaselineJpeg,
   makeGif,
   makeLosslessWebP,
@@ -1000,25 +1001,102 @@ test("publishOutput requires the .gif and .svg extensions for GIF and SVG output
   });
 });
 
-test("publishOutput rejects provider bytes that fail GIF or SVG inspection without residue", async () => {
+test("publishOutput rejects provider bytes that fail output inspection without residue", async () => {
+  const generic = "INVALID_PROVIDER_RESPONSE: Provider image payload failed validation";
   await withLifecycleFixture(async ({ paths }) => {
-    for (const [format, outputPath, bytes] of [
-      ["svg", "outputs/script.svg", makeSvg("<script>alert(1)</script>")],
-      ["svg", "outputs/handler.svg", makeSvg("", 'width="64" height="32" onload="x()"')],
-      ["svg", "outputs/png-bytes.svg", makePng()],
-      ["gif", "outputs/png-bytes.gif", makePng()],
-      ["gif", "outputs/truncated.gif", makeGif({ frames: 2 }).subarray(0, -1)],
-      ["png", "outputs/gif-bytes.png", makeGif()],
-      ["png", "outputs/svg-bytes.png", makeSvg()],
+    for (const [format, outputPath, bytes, message] of [
+      // The requested format, but invalid: the message stays generic.
+      ["svg", "outputs/script.svg", makeSvg("<script>alert(1)</script>"), generic],
+      [
+        "svg",
+        "outputs/handler.svg",
+        makeSvg("", 'width="64" height="32" onload="x()"'),
+        generic,
+      ],
+      ["gif", "outputs/truncated.gif", makeGif({ frames: 2 }).subarray(0, -1), generic],
+      ["png", "outputs/truncated.png", makePng().subarray(0, 40), generic],
+      [
+        "jpeg",
+        "outputs/trailing-bytes.jpg",
+        Buffer.concat([makeBaselineJpeg(), Buffer.from([0x01])]),
+        generic,
+      ],
+      ["webp", "outputs/corrupt.webp", corruptWebPBitstream(makeLosslessWebP()), generic],
+      ["png", "outputs/unknown-bytes.png", Buffer.from("not an image"), generic],
+      // An HTML page is not an SVG document, even with an inline <svg element.
+      [
+        "png",
+        "outputs/html-page.png",
+        Buffer.from(
+          '<!DOCTYPE html><html><body><svg width="1" height="1"></svg></body></html>',
+        ),
+        generic,
+      ],
+      // A recognizable other format: the message names both formats.
+      [
+        "svg",
+        "outputs/png-bytes.svg",
+        makePng(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned png output, but svg was requested",
+      ],
+      [
+        "svg",
+        "outputs/jpeg-bytes.svg",
+        makeBaselineJpeg(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned jpeg output, but svg was requested",
+      ],
+      [
+        "gif",
+        "outputs/png-bytes.gif",
+        makePng(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned png output, but gif was requested",
+      ],
+      [
+        "gif",
+        "outputs/webp-bytes.gif",
+        makeLosslessWebP(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned webp output, but gif was requested",
+      ],
+      [
+        "png",
+        "outputs/gif-bytes.png",
+        makeGif(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned gif output, but png was requested",
+      ],
+      [
+        "png",
+        "outputs/svg-bytes.png",
+        makeSvg(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned svg output, but png was requested",
+      ],
+      [
+        "png",
+        "outputs/jpeg-bytes.png",
+        makeBaselineJpeg(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned jpeg output, but png was requested",
+      ],
+      [
+        "webp",
+        "outputs/png-bytes.webp",
+        makePng(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned png output, but webp was requested",
+      ],
+      [
+        "jpeg",
+        "outputs/webp-bytes.jpg",
+        makeLosslessWebP(),
+        "INVALID_PROVIDER_RESPONSE: Provider returned webp output, but jpeg was requested",
+      ],
     ] as const) {
       const output = await paths.resolveOutput(outputPath);
       await assert.rejects(
         () => publishOutput({ output, base64: Buffer.from(bytes).toString("base64"), format }),
-        (error: unknown) =>
-          error instanceof AppError &&
-          error.code === "INVALID_PROVIDER_RESPONSE" &&
-          error.message ===
-            "INVALID_PROVIDER_RESPONSE: Provider image payload failed validation",
+        (error: unknown) => {
+          assert.ok(error instanceof AppError, outputPath);
+          assert.equal(error.code, "INVALID_PROVIDER_RESPONSE", outputPath);
+          assert.equal(error.message, message, outputPath);
+          return true;
+        },
         outputPath,
       );
       await assert.rejects(() => access(output.absolutePath), { code: "ENOENT" });

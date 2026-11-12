@@ -13,6 +13,7 @@ import { setTimeout as scheduleTimeout } from "node:timers";
 import { setTimeout as delay } from "node:timers/promises";
 import path from "node:path";
 import { AppError } from "../errors.ts";
+import { detectOutputImageFormat } from "../images/detect-format.ts";
 import { inspectOutputImage } from "../images/inspect-output.ts";
 import { decodeStrictBase64 } from "../images/strict-base64.ts";
 import {
@@ -280,6 +281,18 @@ async function validateProviderSnapshot(
     return await inspectOutputImage(storedBytes, format);
   } catch (error) {
     if (error instanceof AppError && error.code === "INPUT_FILE_INVALID") {
+      // Only plugin-defined format names reach the message, never provider
+      // text. `detected` comes from the plugin's own signature check, and
+      // `format` is caller input that assertOutputExtension has already
+      // restricted to the five format names before any provider bytes are
+      // decoded.
+      const detected = detectOutputImageFormat(storedBytes);
+      if (detected !== undefined && detected !== format) {
+        throw new AppError(
+          "INVALID_PROVIDER_RESPONSE",
+          `Provider returned ${detected} output, but ${format} was requested`,
+        );
+      }
       throw new AppError(
         "INVALID_PROVIDER_RESPONSE",
         "Provider image payload failed validation",

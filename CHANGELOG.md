@@ -16,10 +16,12 @@ All notable changes to this plugin are documented in this file.
 ### Changed
 
 - The default model is now `gpt-image-2.6-flare` instead of `gpt-image-2.5-flare`, and `get_status` reports it. Requests that omit `model` therefore send `model: "gpt-image-2.6-flare"` and are billed at the GPT Image 2.6 rates, which changes the cost of those calls; set `model` explicitly to use a different model. SVG output is billed for both the reference image and the SVG authoring tokens.
+- When the plugin recognizes the provider's returned bytes as a different supported format (PNG, JPEG, WebP, GIF, or SVG) than requested, `INVALID_PROVIDER_RESPONSE` now names both formats, for example `Provider returned png output, but svg was requested`, instead of only `Provider image payload failed validation`. Any other image inspection failure keeps the generic message `Provider image payload failed validation`. Nothing is saved in either case.
+- `PROVIDER_FAILURE` messages now include the HTTP status when the endpoint answered, for example `The image provider request failed with HTTP 400 (request ID: req_abc)`. The provider's own error text is still never shown, and `AUTHENTICATION_FAILED`, `RATE_LIMITED`, and `MODERATION_BLOCKED` messages are unchanged.
 
 ### Verification scope
 
-Offline schema, provider-adapter, image-inspection, tool, and protocol tests use fixtures and fake provider clients. No paid image API call was made with any model, and no live provider verification was performed or claimed.
+Offline schema, provider-adapter, image-inspection, tool, and protocol tests use fixtures and fake provider clients. No paid image API call was made by these checks. A few manual paid calls through one third-party OpenAI-compatible endpoint exercised PNG generation and editing with `gpt-image-2.5-flare` and `gpt-image-2.6-flare`; that endpoint did not return SVG or GIF output and did not apply the markup layer, so SVG output, GIF output, and markup-guided edits have not been confirmed end to end. No live provider verification of the OpenAI API was performed or claimed.
 
 ## [0.2.0] - 2026-10-03
 

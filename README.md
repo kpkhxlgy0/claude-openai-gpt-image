@@ -185,7 +185,8 @@ On Windows under Node 20, existing reparse-point/Junction escapes are rejected, 
 - **`OUTPUT_EXISTS`:** choose a new relative output path. The plugin will not overwrite.
 - **`SIZE_MISMATCH`:** use the returned actual width and height; the saved image is valid.
 - **Preview omitted:** open the returned relative or absolute path; inline previews are limited to 2 MiB, and SVG output never has one.
-- **`INVALID_PROVIDER_RESPONSE` for SVG output:** the provider's SVG failed validation, for example because it contained a script, an external reference, or an embedded raster image. Nothing was saved, and the call is not retried automatically.
+- **`INVALID_PROVIDER_RESPONSE`:** the provider's response or image failed validation. For SVG output, the SVG may have contained a script, an external reference, or an embedded raster image. When the plugin recognizes the returned bytes as a different supported format (PNG, JPEG, WebP, GIF, or SVG), the message names both formats, for example `Provider returned png output, but svg was requested`: that endpoint did not produce the requested output format, and the call may still have been billed. Any other image inspection failure keeps the generic message `Provider image payload failed validation`. Nothing was saved, and the call is not retried automatically.
+- **`PROVIDER_FAILURE`:** when the endpoint answered, the message includes its HTTP status, for example `The image provider request failed with HTTP 400`. The provider's own error text is intentionally not shown. A 400 or 404 from a custom endpoint commonly means it does not support the requested model or output format.
 
 ## Build and test from source
 
@@ -206,7 +207,7 @@ npm --ignore-scripts run validate
 claude plugin validate . --strict
 ```
 
-These checks use local fixtures, fakes, and protocol tests. No paid image request is required. **No live provider verification has been performed or claimed.**
+These checks use local fixtures, fakes, and protocol tests. No paid image request is required. **No live provider verification of the OpenAI API has been performed or claimed.**
 
 ## License
 

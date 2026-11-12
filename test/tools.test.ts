@@ -2011,6 +2011,49 @@ test("a provider SVG with a script element fails as INVALID_PROVIDER_RESPONSE an
   });
 });
 
+test("provider PNG bytes for an SVG request name both formats in the error result and leave no output file", async () => {
+  await withRealLifecycle(async ({ root, roots, operations, config }) => {
+    const provider = new FakeProvider(async () => ({
+      base64: makePng().toString("base64"),
+    }));
+    const context = makeContext(roots, provider, operations, config);
+
+    let caught: unknown;
+    try {
+      await generateImage(
+        generateImageSchema.parse({
+          prompt: "draw a vector badge",
+          output_format: "svg",
+          output_path: "outputs/badge.svg",
+        }),
+        context,
+      );
+    } catch (error) {
+      caught = error;
+    }
+
+    const expected =
+      "INVALID_PROVIDER_RESPONSE: Provider returned png output, but svg was requested";
+    assert.ok(caught instanceof AppError);
+    assert.equal(caught.code, "INVALID_PROVIDER_RESPONSE");
+    assert.equal(caught.message, expected);
+    const result = toMcpError(caught);
+    assert.equal(result.isError, true);
+    assert.deepEqual(result.content, [{ type: "text", text: expected }]);
+    assert.deepEqual(result.structuredContent, {
+      isError: true,
+      code: "INVALID_PROVIDER_RESPONSE",
+      message: expected,
+    });
+    assert.equal(provider.generateRequests.length, 1);
+    await assert.rejects(
+      () => access(path.join(root, "outputs", "badge.svg")),
+      { code: "ENOENT" },
+    );
+    assert.deepEqual(await readdir(path.join(root, "outputs")), []);
+  });
+});
+
 test("GIF and SVG outputs require matching extensions before the provider is called", async () => {
   await withRealLifecycle(async ({ root, roots, operations, config }) => {
     await writeFile(path.join(root, "first.png"), makePng({ width: 16, height: 16 }));

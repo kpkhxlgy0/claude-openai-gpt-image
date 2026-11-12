@@ -23370,6 +23370,8 @@ var WorkspaceRootRegistry = class {
 var MAX_SAFE_REQUEST_ID_LENGTH = 128;
 var SAFE_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 var MODERATION_CODE = /content[_-]?policy|content[_-]?filter|moderation|safety/i;
+var MIN_HTTP_STATUS = 100;
+var MAX_HTTP_STATUS = 599;
 function asUnknownRecord(value) {
   return typeof value === "object" && value !== null ? value : void 0;
 }
@@ -23391,7 +23393,10 @@ function readRequestId(error51) {
   const record2 = asUnknownRecord(error51);
   return sanitizeRequestId(record2?.requestID ?? record2?.request_id);
 }
-function errorMessage(code, requestId) {
+function reportableHttpStatus(status) {
+  return typeof status === "number" && Number.isInteger(status) && status >= MIN_HTTP_STATUS && status <= MAX_HTTP_STATUS ? status : void 0;
+}
+function errorMessage(code, requestId, status) {
   let message;
   switch (code) {
     case "AUTHENTICATION_FAILED":
@@ -23403,6 +23408,11 @@ function errorMessage(code, requestId) {
     case "RATE_LIMITED":
       message = "The image provider rate limit was reached";
       break;
+    case "PROVIDER_FAILURE": {
+      const httpStatus = reportableHttpStatus(status);
+      message = httpStatus === void 0 ? "The image provider request failed" : `The image provider request failed with HTTP ${httpStatus}`;
+      break;
+    }
     default:
       message = "The image provider request failed";
   }
@@ -23432,7 +23442,7 @@ function mapOpenAIError(error51) {
   } else {
     code = "PROVIDER_FAILURE";
   }
-  return new AppError(code, errorMessage(code, requestId));
+  return new AppError(code, errorMessage(code, requestId, status));
 }
 
 // src/logger.ts
@@ -45735,6 +45745,111 @@ import { setTimeout as scheduleTimeout2 } from "node:timers";
 import { setTimeout as delay } from "node:timers/promises";
 import path4 from "node:path";
 
+// src/images/detect-format.ts
+var JPEG_SIGNATURE = [255, 216, 255];
+var GIF_SIGNATURES = ["GIF87a", "GIF89a"];
+var WEBP_HEADER_BYTES = 12;
+var SVG_SNIFF_BYTES = 1024;
+var UTF8_BOM = [239, 187, 191];
+var GREATER_THAN = 62;
+var SLASH = 47;
+var OPEN_BRACKET = 91;
+var CLOSE_BRACKET = 93;
+var SVG_ROOT = "<svg";
+function hasBytesAt(bytes, offset, expected) {
+  if (offset + expected.length > bytes.length) return false;
+  for (let index = 0; index < expected.length; index += 1) {
+    if (bytes[offset + index] !== expected[index]) return false;
+  }
+  return true;
+}
+function hasAsciiAt(bytes, offset, text, end = bytes.length) {
+  if (offset + text.length > end) return false;
+  for (let index = 0; index < text.length; index += 1) {
+    if (bytes[offset + index] !== text.charCodeAt(index)) return false;
+  }
+  return true;
+}
+function hasAsciiAtIgnoreCase(bytes, offset, lowerText, end) {
+  if (offset + lowerText.length > end) return false;
+  for (let index = 0; index < lowerText.length; index += 1) {
+    const byte = bytes[offset + index];
+    const lower = byte >= 65 && byte <= 90 ? byte + 32 : byte;
+    if (lower !== lowerText.charCodeAt(index)) return false;
+  }
+  return true;
+}
+function isAsciiWhitespace(byte) {
+  return byte === 9 || byte === 10 || byte === 12 || byte === 13 || byte === 32;
+}
+function skipWhitespace(bytes, start, end) {
+  let position = start;
+  while (position < end && isAsciiWhitespace(bytes[position])) position += 1;
+  return position;
+}
+function indexAfter(bytes, start, terminator, end) {
+  for (let offset = start; offset + terminator.length <= end; offset += 1) {
+    if (hasAsciiAt(bytes, offset, terminator, end)) return offset + terminator.length;
+  }
+  return void 0;
+}
+function indexAfterDoctype(bytes, start, end) {
+  for (let offset = start; offset < end; offset += 1) {
+    const byte = bytes[offset];
+    if (byte === GREATER_THAN) return offset + 1;
+    if (byte === OPEN_BRACKET) {
+      for (let inner = offset + 1; inner < end; inner += 1) {
+        if (bytes[inner] !== CLOSE_BRACKET) continue;
+        const close = skipWhitespace(bytes, inner + 1, end);
+        if (close < end && bytes[close] === GREATER_THAN) return close + 1;
+      }
+      return void 0;
+    }
+  }
+  return void 0;
+}
+function indexAfterPrologConstruct(bytes, position, end) {
+  if (hasAsciiAt(bytes, position, "<?", end)) {
+    return indexAfter(bytes, position + 2, "?>", end);
+  }
+  if (hasAsciiAt(bytes, position, "<!--", end)) {
+    return indexAfter(bytes, position + 4, "-->", end);
+  }
+  if (hasAsciiAtIgnoreCase(bytes, position, "<!doctype", end)) {
+    return indexAfterDoctype(bytes, position + 9, end);
+  }
+  return void 0;
+}
+function isPrologConstructStart(bytes, position, end) {
+  return hasAsciiAt(bytes, position, "<?", end) || hasAsciiAt(bytes, position, "<!--", end) || hasAsciiAtIgnoreCase(bytes, position, "<!doctype", end);
+}
+function looksLikeSvg(bytes) {
+  const end = Math.min(bytes.length, SVG_SNIFF_BYTES);
+  let position = hasBytesAt(bytes, 0, UTF8_BOM) ? UTF8_BOM.length : 0;
+  position = skipWhitespace(bytes, position, end);
+  while (isPrologConstructStart(bytes, position, end)) {
+    const next = indexAfterPrologConstruct(bytes, position, end);
+    if (next === void 0) return false;
+    position = skipWhitespace(bytes, next, end);
+  }
+  const delimiter = position + SVG_ROOT.length;
+  if (!hasAsciiAt(bytes, position, SVG_ROOT, end) || delimiter >= end) return false;
+  const byte = bytes[delimiter];
+  return isAsciiWhitespace(byte) || byte === GREATER_THAN || byte === SLASH;
+}
+function detectOutputImageFormat(bytes) {
+  if (hasBytesAt(bytes, 0, PNG_SIGNATURE)) return "png";
+  if (hasBytesAt(bytes, 0, JPEG_SIGNATURE)) return "jpeg";
+  if (GIF_SIGNATURES.some((signature) => hasAsciiAt(bytes, 0, signature))) {
+    return "gif";
+  }
+  if (bytes.length >= WEBP_HEADER_BYTES && hasAsciiAt(bytes, 0, "RIFF") && hasAsciiAt(bytes, 8, "WEBP")) {
+    return "webp";
+  }
+  if (looksLikeSvg(bytes)) return "svg";
+  return void 0;
+}
+
 // src/images/gif.ts
 var HEADER_BYTES = 6;
 var LOGICAL_SCREEN_END = HEADER_BYTES + 7;
@@ -45873,8 +45988,8 @@ var MAX_VIEW_BOX_LENGTH = 256;
 var MAX_DOCTYPE_LENGTH = 1024;
 var MAX_ELEMENT_DEPTH = 512;
 var LESS_THAN = 60;
-var GREATER_THAN = 62;
-var SLASH = 47;
+var GREATER_THAN2 = 62;
+var SLASH2 = 47;
 var EQUALS = 61;
 var DOUBLE_QUOTE = 34;
 var APOSTROPHE = 39;
@@ -46319,7 +46434,7 @@ var SvgScanner = class {
     const text = this.#text;
     const bodyStart = this.#position + 4;
     const end = text.indexOf("-->", bodyStart);
-    const closesEarlyInHtml = text.charCodeAt(bodyStart) === GREATER_THAN || text.startsWith("->", bodyStart);
+    const closesEarlyInHtml = text.charCodeAt(bodyStart) === GREATER_THAN2 || text.startsWith("->", bodyStart);
     if (end < 0 || closesEarlyInHtml || text.indexOf("--", bodyStart) !== end) {
       invalidSvg("comment is malformed");
     }
@@ -46358,12 +46473,12 @@ var SvgScanner = class {
     while (true) {
       const whitespace = this.#skipWhitespace();
       const code = text.charCodeAt(this.#position);
-      if (code === GREATER_THAN) {
+      if (code === GREATER_THAN2) {
         this.#position += 1;
         return { name, attributes, selfClosing: false };
       }
-      if (code === SLASH) {
-        if (text.charCodeAt(this.#position + 1) !== GREATER_THAN) {
+      if (code === SLASH2) {
+        if (text.charCodeAt(this.#position + 1) !== GREATER_THAN2) {
           invalidSvg("tag is malformed");
         }
         this.#position += 2;
@@ -46393,7 +46508,7 @@ var SvgScanner = class {
     this.#position += 2;
     const name = this.#readName();
     this.#skipWhitespace();
-    if (this.#text.charCodeAt(this.#position) !== GREATER_THAN) {
+    if (this.#text.charCodeAt(this.#position) !== GREATER_THAN2) {
       invalidSvg("tag is malformed");
     }
     this.#position += 1;
@@ -46689,6 +46804,13 @@ async function validateProviderSnapshot(tempPath, format) {
     return await inspectOutputImage(storedBytes, format);
   } catch (error51) {
     if (error51 instanceof AppError && error51.code === "INPUT_FILE_INVALID") {
+      const detected = detectOutputImageFormat(storedBytes);
+      if (detected !== void 0 && detected !== format) {
+        throw new AppError(
+          "INVALID_PROVIDER_RESPONSE",
+          `Provider returned ${detected} output, but ${format} was requested`
+        );
+      }
       throw new AppError(
         "INVALID_PROVIDER_RESPONSE",
         "Provider image payload failed validation"

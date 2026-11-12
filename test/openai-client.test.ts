@@ -1191,6 +1191,10 @@ test("sanitizes provider failures while retaining only a safe request ID", async
   assert.equal(caught.code, "PROVIDER_FAILURE");
   assert.equal(caught.cause, undefined);
   assert.match(caught.message, /req_safe_sanitized-1/);
+  assert.equal(
+    caught.message,
+    "PROVIDER_FAILURE: The image provider request failed with HTTP 500 (request ID: req_safe_sanitized-1)",
+  );
   const serialized = JSON.stringify(toErrorResult(caught));
   for (const forbidden of [
     prompt,
@@ -1207,6 +1211,128 @@ test("sanitizes provider failures while retaining only a safe request ID", async
     assert.equal(serialized.includes(forbidden), false, forbidden);
   }
   assert.equal(state.generateBodies.length, 1);
+});
+
+async function providerFailureMessage(error: unknown): Promise<string> {
+  const { client } = createClient({ generate: () => apiFailure(error) });
+  try {
+    await client.generate(generateRequest);
+  } catch (caught) {
+    assert.ok(caught instanceof AppError);
+    return caught.message;
+  }
+  assert.fail("generate must reject");
+}
+
+test("provider failure messages include a validated HTTP status and nothing else from the provider", async () => {
+  const generic = "PROVIDER_FAILURE: The image provider request failed";
+  const cases: ReadonlyArray<{ label: string; error: unknown; message: string }> = [
+    {
+      label: "500 with a safe request ID",
+      error: providerError({ status: 500, code: "server_error", requestID: "req_abc" }),
+      message: `${generic} with HTTP 500 (request ID: req_abc)`,
+    },
+    {
+      label: "400 without a request ID",
+      error: providerError({ status: 400, code: "invalid_request_error" }),
+      message: `${generic} with HTTP 400`,
+    },
+    {
+      label: "404 with an unsafe request ID",
+      error: providerError({ status: 404, request_id: "req <unsafe>" }),
+      message: `${generic} with HTTP 404`,
+    },
+    {
+      label: "lowest valid status",
+      error: providerError({ status: 100 }),
+      message: `${generic} with HTTP 100`,
+    },
+    {
+      label: "highest valid status",
+      error: providerError({ status: 599 }),
+      message: `${generic} with HTTP 599`,
+    },
+    {
+      label: "connection error without a status",
+      error: new Error("socket disconnected after upload"),
+      message: generic,
+    },
+    {
+      label: "connection error with a safe request ID",
+      error: providerError({ requestID: "req_conn-1" }),
+      message: `${generic} (request ID: req_conn-1)`,
+    },
+    {
+      label: "string status",
+      error: providerError({ status: "400", requestID: "req_abc" }),
+      message: `${generic} (request ID: req_abc)`,
+    },
+    { label: "fractional status", error: providerError({ status: 400.5 }), message: generic },
+    { label: "status below range", error: providerError({ status: 99 }), message: generic },
+    { label: "status above range", error: providerError({ status: 600 }), message: generic },
+    { label: "NaN status", error: providerError({ status: Number.NaN }), message: generic },
+    {
+      label: "infinite status",
+      error: providerError({ status: Number.POSITIVE_INFINITY }),
+      message: generic,
+    },
+    { label: "negative status", error: providerError({ status: -400 }), message: generic },
+    {
+      label: "boxed Number status",
+      error: providerError({ status: new Number(400) }),
+      message: generic,
+    },
+    {
+      label: "object status with valueOf and toString",
+      error: providerError({ status: { valueOf: () => 400, toString: () => "400" } }),
+      message: generic,
+    },
+    { label: "bigint status", error: providerError({ status: 400n }), message: generic },
+  ];
+
+  for (const fixture of cases) {
+    assert.equal(await providerFailureMessage(fixture.error), fixture.message, fixture.label);
+  }
+});
+
+test("authentication, rate-limit, and moderation messages carry no HTTP status", async () => {
+  const cases: ReadonlyArray<{ label: string; error: unknown; message: string }> = [
+    {
+      label: "401",
+      error: providerError({ status: 401, code: "invalid_api_key" }),
+      message: "AUTHENTICATION_FAILED: Authentication with the image provider failed",
+    },
+    {
+      label: "403 with a safe request ID",
+      error: providerError({ status: 403, code: "permission_denied", requestID: "req_auth-1" }),
+      message:
+        "AUTHENTICATION_FAILED: Authentication with the image provider failed (request ID: req_auth-1)",
+    },
+    {
+      label: "429",
+      error: providerError({ status: 429, code: "rate_limit_exceeded" }),
+      message: "RATE_LIMITED: The image provider rate limit was reached",
+    },
+    {
+      label: "400 moderation",
+      error: providerError({ status: 400, code: "content_policy_violation" }),
+      message: "MODERATION_BLOCKED: The image request was blocked by provider safety controls",
+    },
+    {
+      label: "403 moderation with a safe request ID",
+      error: providerError({
+        status: 403,
+        error: { code: "moderation_blocked" },
+        requestID: "req_mod-1",
+      }),
+      message:
+        "MODERATION_BLOCKED: The image request was blocked by provider safety controls (request ID: req_mod-1)",
+    },
+  ];
+
+  for (const fixture of cases) {
+    assert.equal(await providerFailureMessage(fixture.error), fixture.message, fixture.label);
+  }
 });
 
 test("bounded snapshot reads reject descriptor/file size changes before an SDK call", async () => {

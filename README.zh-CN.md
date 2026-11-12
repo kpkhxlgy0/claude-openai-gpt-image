@@ -187,7 +187,8 @@ URL 必须是绝对 HTTP(S) 地址，不能包含用户名或密码、query、fr
 - **`OUTPUT_EXISTS`：** 更换相对输出路径；插件禁止覆盖。
 - **`SIZE_MISMATCH`：** 使用返回的实际宽高；已保存图像仍然有效。
 - **预览被省略：** 打开返回的相对或绝对路径；inline preview 上限是 2 MiB，SVG 输出始终没有预览。
-- **SVG 输出返回 `INVALID_PROVIDER_RESPONSE`：** 服务商返回的 SVG 未通过验证，例如包含脚本、外部引用或嵌入的位图图像。不会保存任何文件，也不会自动重试。
+- **`INVALID_PROVIDER_RESPONSE`：** 服务商的响应或图像未通过验证。对于 SVG 输出，可能是 SVG 包含脚本、外部引用或嵌入的位图图像。若插件识别出返回的字节是另一种受支持的格式（PNG、JPEG、WebP、GIF 或 SVG），错误信息会同时写出这两种格式，例如 `Provider returned png output, but svg was requested`：这表示该端点没有生成所请求的输出格式，且该调用仍可能已计费。其他任何图像检查失败仍使用通用信息 `Provider image payload failed validation`。不会保存任何文件，也不会自动重试。
+- **`PROVIDER_FAILURE`：** 若端点有响应，错误信息会包含其 HTTP 状态码，例如 `The image provider request failed with HTTP 400`。插件有意不显示服务商自己的错误文本。自定义端点返回 400 或 404，通常表示它不支持所请求的模型或输出格式。
 
 ## 从源码构建与测试
 
@@ -208,7 +209,7 @@ npm --ignore-scripts run validate
 claude plugin validate . --strict
 ```
 
-这些检查使用本地 fixture、fake 和协议测试，不需要付费图像请求。**未进行任何实时服务商验证，也不作此类声明。**
+这些检查使用本地 fixture、fake 和协议测试，不需要付费图像请求。**未进行任何针对 OpenAI API 的实时服务商验证，也不作此类声明。**
 
 ## 许可证
 

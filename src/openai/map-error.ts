@@ -3,6 +3,8 @@ import { AppError, type ErrorCode } from "../errors.ts";
 const MAX_SAFE_REQUEST_ID_LENGTH = 128;
 const SAFE_REQUEST_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const MODERATION_CODE = /content[_-]?policy|content[_-]?filter|moderation|safety/i;
+const MIN_HTTP_STATUS = 100;
+const MAX_HTTP_STATUS = 599;
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
 
@@ -38,7 +40,24 @@ function readRequestId(error: unknown): string | undefined {
   return sanitizeRequestId(record?.requestID ?? record?.request_id);
 }
 
-function errorMessage(code: ErrorCode, requestId: string | undefined): string {
+/**
+ * Returns the status only when it is an integer HTTP status code. It is the
+ * one provider value besides a sanitized request ID that may reach a message.
+ */
+function reportableHttpStatus(status: unknown): number | undefined {
+  return typeof status === "number" &&
+    Number.isInteger(status) &&
+    status >= MIN_HTTP_STATUS &&
+    status <= MAX_HTTP_STATUS
+    ? status
+    : undefined;
+}
+
+function errorMessage(
+  code: ErrorCode,
+  requestId: string | undefined,
+  status: number | undefined,
+): string {
   let message: string;
   switch (code) {
     case "AUTHENTICATION_FAILED":
@@ -50,6 +69,14 @@ function errorMessage(code: ErrorCode, requestId: string | undefined): string {
     case "RATE_LIMITED":
       message = "The image provider rate limit was reached";
       break;
+    case "PROVIDER_FAILURE": {
+      const httpStatus = reportableHttpStatus(status);
+      message =
+        httpStatus === undefined
+          ? "The image provider request failed"
+          : `The image provider request failed with HTTP ${httpStatus}`;
+      break;
+    }
     default:
       message = "The image provider request failed";
   }
@@ -91,5 +118,5 @@ export function mapOpenAIError(error: unknown): AppError {
     code = "PROVIDER_FAILURE";
   }
 
-  return new AppError(code, errorMessage(code, requestId));
+  return new AppError(code, errorMessage(code, requestId, status));
 }
