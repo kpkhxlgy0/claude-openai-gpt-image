@@ -134,7 +134,7 @@ function fail(message) {
 }
 
 const MAX_INDEX_FILE_BYTES = 128 * 1024 * 1024;
-const RELEASE_VERSION = "0.2.0";
+const RELEASE_VERSION = "0.3.0";
 
 let indexMaterializationSafe = true;
 let indexEntries = [];

@@ -48186,7 +48186,7 @@ function createImageServer(dependencies) {
 }
 
 // src/index.ts
-var SERVER_VERSION = "0.2.0";
+var SERVER_VERSION = "0.3.0";
 var logger = createSafeLogger();
 async function main() {
   const config2 = loadEnvironment(process.env);

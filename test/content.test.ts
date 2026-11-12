@@ -732,16 +732,16 @@ test("legal and release files identify the release without unsupported verificat
     "THIRD_PARTY_NOTICES.md",
   );
   assert.match(changelog, /^## \[0\.1\.1\]/m);
-  const unreleasedStart = changelog.indexOf("\n## [Unreleased]\n");
-  const latestReleaseStart = changelog.indexOf("\n## [0.2.0] - 2026-10-03\n");
-  assert.ok(unreleasedStart >= 0, "CHANGELOG.md must have an Unreleased section");
+  const releaseStart = changelog.indexOf("\n## [0.3.0] - 2026-11-12\n");
+  const previousReleaseStart = changelog.indexOf("\n## [0.2.0] - 2026-10-03\n");
+  assert.ok(releaseStart >= 0, "CHANGELOG.md must have a 0.3.0 release section");
   assert.ok(
-    unreleasedStart < latestReleaseStart,
-    "CHANGELOG.md Unreleased section must precede the 0.2.0 release",
+    releaseStart < previousReleaseStart,
+    "CHANGELOG.md 0.3.0 release section must precede the 0.2.0 release",
   );
-  const unreleased = changelog.slice(unreleasedStart, latestReleaseStart);
+  const release = changelog.slice(releaseStart, previousReleaseStart);
   assertIncludesAll(
-    unreleased,
+    release,
     [
       "### Added",
       "### Changed",
@@ -759,9 +759,9 @@ test("legal and release files identify the release without unsupported verificat
       "billed at the GPT Image 2.6 rates",
       "SVG output is billed for both the reference image and the SVG authoring tokens.",
     ],
-    "CHANGELOG.md Unreleased section",
+    "CHANGELOG.md 0.3.0 release section",
   );
-  assert.match(unreleased, /No paid image API call was made/);
+  assert.match(release, /No paid image API call was made/);
   assert.match(changelog, /API key.{0,100}(?:optional|not required).{0,120}(?:startup|manifest)/is);
   assert.ok(
     changelog.includes(
